@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "26.1.0"
+          cache: npm
+
+      - name: Setup .NET 9 SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore tool caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            artifacts/pdf-toolchain
+            artifacts/puppeteer
+            artifacts/tectonic-cache
+          key: ${{ runner.os }}-markdown-pdf-${{ hashFiles('src/RensMarkdownTemplates/Models/ToolchainManifest.cs', 'package-lock.json') }}
+
+      - name: Install Mermaid dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: dotnet test tests/RensMarkdownTemplates.Tests/RensMarkdownTemplates.Tests.csproj
+
+      - name: Render Mermaid fixture
+        run: >-
+          dotnet run --project src/RensMarkdownTemplates.Cli
+          -- render
+          --input tests/fixtures/mermaid.md
+          --output artifacts/verification/mermaid.pdf
+          --content-root .
+          --cache-root artifacts
+          --pipeline-root .
+          --force
+
+      - name: Validate PDF signature
+        shell: bash
+        run: test "$(head -c 5 artifacts/verification/mermaid.pdf)" = "%PDF-"

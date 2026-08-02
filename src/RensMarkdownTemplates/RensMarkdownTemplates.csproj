@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InternalsVisibleTo>RensMarkdownTemplates.Tests</InternalsVisibleTo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.7" />
+    <PackageReference Include="YamlDotNet" Version="16.3.0" />
+  </ItemGroup>
+
+  <Target Name="EnsureMermaidDependencies"
+          BeforeTargets="Build"
+          Inputs="$(MSBuildThisFileDirectory)..\..\package.json;$(MSBuildThisFileDirectory)..\..\package-lock.json"
+          Outputs="$(MSBuildThisFileDirectory)..\..\node_modules\.rens-markdown-install.stamp">
+    <Message Text="Restoring RensMarkdownTemplates Mermaid dependencies..." Importance="high" />
+    <Exec Command="npm ci" WorkingDirectory="$(MSBuildThisFileDirectory)..\.." />
+    <Touch Files="$(MSBuildThisFileDirectory)..\..\node_modules\.rens-markdown-install.stamp" AlwaysCreate="true" />
+  </Target>
+</Project>

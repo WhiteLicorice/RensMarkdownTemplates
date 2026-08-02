@@ -1,0 +1,6 @@
+artifacts/
+bin/
+obj/
+node_modules/
+TestResults/
+*.user

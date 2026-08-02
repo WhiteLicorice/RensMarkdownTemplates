@@ -1,0 +1,11 @@
+{
+  "name": "rens-markdown-templates",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Shared Markdown-to-PDF pipeline for Ren's course repositories.",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "11.16.0",
+    "puppeteer": "25.3.0"
+  }
+}
