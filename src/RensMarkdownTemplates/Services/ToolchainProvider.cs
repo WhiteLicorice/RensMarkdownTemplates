@@ -73,7 +73,7 @@ public class ToolchainProvider : IToolchainProvider
     public string OutputDirectory => _outputDirectory;
     public string CacheStateDirectory => Path.Combine(_artifactsDir, "material-pdfs", "state");
     public string WorkDirectory => Path.Combine(_artifactsDir, "material-pdfs", "work");
-    public string PuppeteerCachePath => Path.Combine(_artifactsDir, "puppeteer");
+    public string PuppeteerCachePath => Path.Combine(_pipelineRoot, "artifacts", "puppeteer");
 
     public async Task<bool> BootstrapAsync(ILogger logger, CancellationToken ct = default)
     {
