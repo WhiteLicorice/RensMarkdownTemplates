@@ -765,7 +765,7 @@ public class PdfGeneratorService
         return Convert.ToHexString(sha.Hash!).ToLowerInvariant();
     }
 
-    internal static (T? fm, int bodyStart) ParseFrontMatter<T>(string raw, IDeserializer deser) where T : class
+    public static (T? fm, int bodyStart) ParseFrontMatter<T>(string raw, IDeserializer deser) where T : class
     {
         var match = FrontMatterBlock.Match(raw);
         if (!match.Success)
