@@ -33,9 +33,6 @@ jobs:
             artifacts/tectonic-cache
           key: ${{ runner.os }}-markdown-pdf-${{ hashFiles('src/RensMarkdownTemplates/Models/ToolchainManifest.cs', 'package-lock.json') }}
 
-      - name: Install Mermaid dependencies
-        run: npm ci
-
       - name: Run unit tests
         run: dotnet test tests/RensMarkdownTemplates.Tests/RensMarkdownTemplates.Tests.csproj
 
