@@ -52,7 +52,8 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $cliDll -PathType Leaf)
 }
 
 $pipelineFiles = @(
-    Get-ChildItem -LiteralPath (Join-Path $pipelineRoot 'src') -File -Recurse
+    Get-ChildItem -LiteralPath (Join-Path $pipelineRoot 'src') -File -Recurse |
+        Where-Object { $_.FullName -notmatch '[\\/](?:bin|obj)[\\/]' }
     Get-ChildItem -LiteralPath (Join-Path $pipelineRoot 'templates') -File -Recurse
     Get-Item -LiteralPath (Join-Path $pipelineRoot '.mmdc.json')
     Get-Item -LiteralPath (Join-Path $pipelineRoot 'package-lock.json')
