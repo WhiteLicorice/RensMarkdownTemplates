@@ -83,17 +83,6 @@ local function schedule_table(table_element, title)
     )
   end
   local header_row = table.concat(header, " & ")
-  local page_header = string.format(
-    "\\multicolumn{%d}{@{}l@{}}{\\makebox[\\linewidth]{"
-      .. "\\scriptsize\\color{upgray}\\thepage\\ \\textbar{} Page"
-      .. "\\hfill\\RunningHeaderText}} \\\\",
-    columns
-  )
-  local page_rule = string.format(
-    "\\multicolumn{%d}{@{}l@{}}{\\color{black!50}"
-      .. "\\rule{\\linewidth}{0.25pt}} \\\\[0.8ex]",
-    columns
-  )
   local table_title = nil
   if title ~= nil and title ~= "" then
     table_title = string.format(
@@ -139,9 +128,6 @@ local function schedule_table(table_element, title)
   )
   table.insert(output, "\\hline")
   table.insert(output, "\\endfirsthead")
-  table.insert(output, "\\noalign{\\vspace{0.42in}}")
-  table.insert(output, page_header)
-  table.insert(output, page_rule)
   table.insert(output, "\\hline")
   table.insert(
     output,
@@ -209,7 +195,7 @@ local function landscape_region(blocks)
   return {
     pandoc.RawBlock(
       "latex",
-      "\\SyllabusLandscapeBegin\n\\LandscapeContentHeader\n\\begingroup\n\\small"
+      "\\SyllabusLandscapeBegin\n\\begingroup\n\\small"
     ),
     pandoc.RawBlock("latex", render_blocks(transform_blocks(blocks))),
     pandoc.RawBlock(

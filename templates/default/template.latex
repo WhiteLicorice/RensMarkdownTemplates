@@ -83,11 +83,6 @@ $endif$
 \newcommand{\PreparedBy}{$if(author)$Prepared by: $for(author)$$author$$sep$, $endfor$$endif$}
 \newcommand{\RunningHeaderText}{%
   \ifodd\value{page}\PreparedBy\else\MaterialSubtitle\fi}
-\newcommand{\LandscapeContentHeader}{%
-  \noindent\makebox[\linewidth]{%
-    \scriptsize\color{upgray}\thepage\ \textbar{} Page%
-    \hfill\RunningHeaderText}\par
-  \vspace{0.3ex}{\color{black!50}\hrule height 0.25pt}\vspace{1.0ex}}
 \newcommand{\TemplateAssets}{\detokenize{$templateAssets$}}
 \newcommand{\CourseTitleFont}{\fontfamily{qtm}\fontseries{b}\selectfont}
 \newif\ifsyllabuslandscape
@@ -123,6 +118,54 @@ $endif$
   \ifsyllabuslandscape\else
     \AtPageLowerLeft{\color{upmaroon}\rule{\paperwidth}{0.26in}}%
     \AtPageLowerLeft{\raisebox{0.26in}{\color{upgreen}\rule{\paperwidth}{0.055in}}}%
+  \fi
+}
+
+% Running header for rotated pages.
+%
+% It has to be drawn here rather than by fancyhdr or by the content, and the
+% reason is different in each case. pdflscape rotates the page but not the
+% header fancyhdr sets, so a fancy header ends up reading sideways down the
+% margin. Putting the header in the content instead reads the right way, but
+% longtable boxes a repeated head once and reuses it, freezing \thepage at
+% whatever the first page happened to be.
+%
+% eso-pic runs this at shipout, once per page, so \thepage is the real number,
+% and \rotatebox puts the text back in line with the rotated content. The page
+% is rotated 90 degrees clockwise for the reader, so the paper's left edge is
+% the edge the reader sees as the top.
+% Distance from the paper's left edge to the text block, which the reader sees
+% as the gap above the content, and the width of the block itself.
+\newcommand{\LandscapeSideMargin}{\dimexpr 1in+\oddsidemargin\relax}
+\newcommand{\LandscapeTextWidth}{\dimexpr\paperheight-2in-2\oddsidemargin\relax}
+
+\AddToShipoutPictureFG{%
+  \ifsyllabuslandscape
+    \AtPageLowerLeft{%
+      \raisebox{0pt}[0pt][0pt]{%
+        \hspace{\dimexpr\LandscapeSideMargin-\headsep\relax}%
+        \rotatebox[origin=lB]{90}{%
+          \makebox[\paperheight]{%
+            \hspace{\LandscapeSideMargin}%
+            \scriptsize\color{upgray}\thepage\ \textbar{} Page%
+            \hfill\RunningHeaderText%
+            \hspace{\LandscapeSideMargin}%
+          }%
+        }%
+      }%
+    }%
+    \AtPageLowerLeft{%
+      \raisebox{0pt}[0pt][0pt]{%
+        \hspace{\dimexpr\LandscapeSideMargin-\headsep+0.10in\relax}%
+        \rotatebox[origin=lB]{90}{%
+          \makebox[\paperheight]{%
+            \hspace{\LandscapeSideMargin}%
+            \color{black!50}\rule{\LandscapeTextWidth}{0.25pt}%
+            \hspace{\LandscapeSideMargin}%
+          }%
+        }%
+      }%
+    }%
   \fi
 }
 
