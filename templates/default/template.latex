@@ -82,7 +82,11 @@ $endif$
 \newcommand{\MaterialSubtitle}{$if(subtitle)$$subtitle$$endif$}
 \newcommand{\PreparedBy}{$if(author)$Prepared by: $for(author)$$author$$sep$, $endfor$$endif$}
 \newcommand{\RunningHeaderText}{%
-  \ifodd\value{page}\PreparedBy\else\MaterialSubtitle\fi}
+  $if(pdf.variables.academicTerm)$%
+  \MaterialSubtitle%
+  $else$%
+  \ifodd\value{page}\PreparedBy\else\MaterialSubtitle\fi%
+  $endif$}
 \newcommand{\TemplateAssets}{\detokenize{$templateAssets$}}
 \newcommand{\CourseTitleFont}{\fontfamily{qtm}\fontseries{b}\selectfont}
 \newif\ifsyllabuslandscape
