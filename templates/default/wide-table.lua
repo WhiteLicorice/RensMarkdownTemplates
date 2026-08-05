@@ -1,6 +1,10 @@
 -- Shared structural rendering for formal syllabi and ordinary materials.
--- Study schedules use the OBE form's ruled, shaded, repeating-header table.
--- Wide ordinary tables and complete rubric sections use landscape pages.
+--
+-- Two separate decisions, one trigger each. A ::: {.study-schedule} div draws
+-- its tables in the OBE form's ruled, shaded, repeating-header style. A
+-- <!-- landscape-start --> / <!-- landscape-end --> pair turns the pages
+-- between them landscape. Nothing else rotates a page, so when a PDF comes out
+-- sideways there is exactly one place to look for the reason.
 
 local function render_blocks(blocks)
   local rendered = pandoc.write(pandoc.Pandoc(blocks), "latex")
@@ -110,6 +114,11 @@ local function schedule_table(table_element, title)
     columns
   )
 
+  -- The first page carries no running header of its own. Whatever placed the
+  -- table there printed one already: a landscape region opens with
+  -- \LandscapeContentHeader, and an upright page has the ordinary fancyhdr
+  -- header. Continuation pages are the ones that need it, so \endhead below
+  -- keeps its copy.
   local output = {
     "\\begingroup",
     "\\small",
@@ -117,8 +126,6 @@ local function schedule_table(table_element, title)
     "\\renewcommand{\\arraystretch}{1.20}",
     "\\arrayrulecolor{black!28}",
     "\\begin{longtable}{|" .. table.concat(specs, "|") .. "|}",
-    page_header,
-    page_rule,
   }
   if table_title ~= nil then
     table.insert(output, table_title)
@@ -176,29 +183,35 @@ local function has_class(div, expected)
   return false
 end
 
-local function is_rubric_header(block)
-  if block.t ~= "Header" then
+-- Landscape regions are delimited the way page breaks and diagrams are, with a
+-- marker on its own line. A marker shown inside a fenced code block reaches the
+-- filter as a CodeBlock rather than a RawBlock, so it stays literal on its own.
+local landscape_start = "^<!%-%-%s*landscape%-start%s*%-%->$"
+local landscape_end = "^<!%-%-%s*landscape%-end%s*%-%->$"
+
+local function is_marker(block, pattern)
+  if block.t ~= "RawBlock" or block.format ~= "html" then
     return false
   end
-  local text = pandoc.utils.stringify(block.content):lower()
-  return text:find("rubric", 1, true) ~= nil
+  return block.text:lower():match(pattern) ~= nil
 end
 
-local function landscape_table(table_element, title)
-  return {
-    pandoc.RawBlock("latex", "\\SyllabusLandscapeBegin"),
-    pandoc.RawBlock("latex", schedule_table(table_element, title)),
-    pandoc.RawBlock("latex", "\\SyllabusLandscapeEnd"),
-  }
+-- The ruled, shaded, repeating-header form from the OBE study schedule. This
+-- picks how a table is drawn and says nothing about which way the page faces;
+-- rotating it is the markers' job.
+local function ruled_table(table_element, title)
+  return pandoc.RawBlock("latex", schedule_table(table_element, title))
 end
 
-local function landscape_rubric(blocks)
+local transform_blocks
+
+local function landscape_region(blocks)
   return {
     pandoc.RawBlock(
       "latex",
       "\\SyllabusLandscapeBegin\n\\LandscapeContentHeader\n\\begingroup\n\\small"
     ),
-    pandoc.RawBlock("latex", render_blocks(blocks)),
+    pandoc.RawBlock("latex", render_blocks(transform_blocks(blocks))),
     pandoc.RawBlock(
       "latex",
       "\\endgroup\n\\SyllabusLandscapeEnd"
@@ -206,55 +219,57 @@ local function landscape_rubric(blocks)
   }
 end
 
-local function transform_blocks(blocks, auto_wide_tables)
+transform_blocks = function(blocks)
   local output = {}
   local index = 1
   while index <= #blocks do
     local block = blocks[index]
-    if is_rubric_header(block) then
-      local rubric_level = block.level
-      local rubric_blocks = {block}
+    if is_marker(block, landscape_start) then
+      local region = {}
+      local closed = false
       index = index + 1
       while index <= #blocks do
         local candidate = blocks[index]
-        if (
-          candidate.t == "Header"
-          and candidate.level <= rubric_level
-        ) then
+        index = index + 1
+        if is_marker(candidate, landscape_end) then
+          closed = true
           break
         end
-        table.insert(rubric_blocks, candidate)
-        index = index + 1
+        if is_marker(candidate, landscape_start) then
+          error(
+            "<!-- landscape-start --> inside an open landscape region; "
+              .. "close the first one before opening another"
+          )
+        end
+        table.insert(region, candidate)
       end
-      for _, replacement in ipairs(landscape_rubric(rubric_blocks)) do
+      if not closed then
+        error(
+          "<!-- landscape-start --> without a matching <!-- landscape-end -->"
+        )
+      end
+      for _, replacement in ipairs(landscape_region(region)) do
         table.insert(output, replacement)
       end
-    elseif block.t == "Div" and has_class(block, "landscape") then
+    elseif is_marker(block, landscape_end) then
+      error(
+        "<!-- landscape-end --> without a matching <!-- landscape-start -->"
+      )
+    elseif block.t == "Div" and has_class(block, "study-schedule") then
       local title = nil
       for _, child in ipairs(block.content) do
         if child.t == "Header" and title == nil then
           title = render_blocks({pandoc.Plain(child.content)})
         elseif child.t == "Table" then
-          for _, replacement in ipairs(landscape_table(child, title)) do
-            table.insert(output, replacement)
-          end
+          table.insert(output, ruled_table(child, title))
           title = nil
         else
           table.insert(output, child)
         end
       end
       index = index + 1
-    elseif (
-      block.t == "Table"
-      and auto_wide_tables
-      and #block.colspecs >= 6
-    ) then
-      for _, replacement in ipairs(landscape_table(block, nil)) do
-        table.insert(output, replacement)
-      end
-      index = index + 1
     elseif block.t == "Div" then
-      block.content = transform_blocks(block.content, auto_wide_tables)
+      block.content = transform_blocks(block.content)
       table.insert(output, block)
       index = index + 1
     else
@@ -267,15 +282,7 @@ end
 
 function Pandoc(document)
   if FORMAT:match("latex") then
-    local pdf = document.meta.pdf
-    local variables = pdf ~= nil and pdf.variables or nil
-    local is_formal_syllabus = (
-      variables ~= nil and variables.academicTerm ~= nil
-    )
-    document.blocks = transform_blocks(
-      document.blocks,
-      not is_formal_syllabus
-    )
+    document.blocks = transform_blocks(document.blocks)
   end
   return document
 end

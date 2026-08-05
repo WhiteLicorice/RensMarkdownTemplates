@@ -105,9 +105,18 @@ fails that document without preventing the course site from generating its other
 ## Templates and tests
 
 The default template supports ordinary course materials and the formal syllabus
-variables shown above. It also handles syntax-colored code, automatically and explicitly
-rotated tables, rubric sections, institutional assets, and standalone `<!-- newpage -->`
-markers.
+variables shown above. It also handles syntax-colored code, ruled schedule tables,
+institutional assets, and standalone `<!-- newpage -->` markers.
+
+Content between `<!-- landscape-start -->` and `<!-- landscape-end -->` markers, each on
+its own line, is rotated onto landscape pages along with its headings and prose. Nothing
+else rotates a page. The markers have to pair up, and an unclosed one fails that document
+rather than quietly rotating everything after it.
+
+A `::: {.study-schedule}` wrapper draws the tables inside it in the OBE form's ruled,
+shaded style with a repeating header, and a heading inside the wrapper titles the table.
+That is a drawing choice on its own; nest it inside the markers when the page also needs
+turning.
 
 Run the maintained unit gate with:
 
