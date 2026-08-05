@@ -589,6 +589,208 @@ public class PdfGenerationTests
         Assert.Contains("  - demo", result);
     }
 
+    // --- StageMedia ---
+
+    private static PdfGeneratorService MakeGenerator() => new(
+        new MockToolchainProvider("."),
+        new RecordingPdfProcessRunner(),
+        new NoOpMermaidRenderer(),
+        new PdfCacheService(new MockToolchainProvider(".")),
+        new PdfGenerationManifest(),
+        ".");
+
+    [Fact]
+    public void StageMedia_CopiesReferencedImage_AndRewritesPath()
+    {
+        using var tempDir = new TempDirectory();
+        var mediaDir = Path.Combine(tempDir.Path, "media");
+        Directory.CreateDirectory(mediaDir);
+        var image = Path.Combine(mediaDir, "figure-1.png");
+        File.WriteAllBytes(image, [0x89, 0x50, 0x4E, 0x47]);
+        var workDir = Path.Combine(tempDir.Path, "work");
+        Directory.CreateDirectory(workDir);
+
+        var src = MakeMaterialSource("---\ntitle: Test\npublished: 2026-01-01\n---\nBody");
+        src.MediaPaths.Add(new MediaAsset("media/figure-1.png", image));
+
+        var result = MakeGenerator().StageMedia(src, workDir,
+            "Text\n\n![A screenshot](media/figure-1.png)\n", new CollectingLogger());
+
+        Assert.DoesNotContain("](media/figure-1.png)", result);
+        Assert.Contains("A screenshot", result);
+
+        var staged = Path.GetFileName(Directory.GetFiles(Path.Combine(workDir, "media")).Single());
+        Assert.Contains($"](media/{staged})", result);
+        Assert.Equal(File.ReadAllBytes(image),
+            File.ReadAllBytes(Path.Combine(workDir, "media", staged)));
+    }
+
+    [Fact]
+    public void StageMedia_LeavesUnstagedReferencesAlone()
+    {
+        using var tempDir = new TempDirectory();
+        var image = Path.Combine(tempDir.Path, "figure-1.png");
+        File.WriteAllBytes(image, [0x89, 0x50, 0x4E, 0x47]);
+        var workDir = Path.Combine(tempDir.Path, "work");
+        Directory.CreateDirectory(workDir);
+
+        var src = MakeMaterialSource("---\ntitle: Test\npublished: 2026-01-01\n---\nBody");
+        src.MediaPaths.Add(new MediaAsset("figure-1.png", image));
+
+        // Mermaid steps are rendered straight into the work directory, so their
+        // links already resolve where Tectonic runs and must survive untouched.
+        var result = MakeGenerator().StageMedia(src, workDir,
+            "![Step one](mmd_0000.pdf)\n\n![Shot](figure-1.png)\n", new CollectingLogger());
+
+        Assert.Contains("![Step one](mmd_0000.pdf)", result);
+        Assert.DoesNotContain("](figure-1.png)", result);
+    }
+
+    [Fact]
+    public void StageMedia_SanitizesAwkwardFileNames()
+    {
+        using var tempDir = new TempDirectory();
+        var image = Path.Combine(tempDir.Path, "my figure #1.final.png");
+        File.WriteAllBytes(image, [0x89, 0x50, 0x4E, 0x47]);
+        var workDir = Path.Combine(tempDir.Path, "work");
+        Directory.CreateDirectory(workDir);
+
+        var src = MakeMaterialSource("---\ntitle: Test\npublished: 2026-01-01\n---\nBody");
+        src.MediaPaths.Add(new MediaAsset("my figure #1.final.png", image));
+
+        MakeGenerator().StageMedia(src, workDir,
+            "![Shot](my figure #1.final.png)\n", new CollectingLogger());
+
+        var staged = Path.GetFileName(Directory.GetFiles(Path.Combine(workDir, "media")).Single());
+        Assert.Matches("^[0-9a-f]{8}-[A-Za-z0-9_-]+\\.png$", staged);
+    }
+
+    [Fact]
+    public void StageMedia_TwoFilesSharingAName_StayDistinct()
+    {
+        using var tempDir = new TempDirectory();
+        var firstDir = Path.Combine(tempDir.Path, "one");
+        var secondDir = Path.Combine(tempDir.Path, "two");
+        Directory.CreateDirectory(firstDir);
+        Directory.CreateDirectory(secondDir);
+        var first = Path.Combine(firstDir, "shot.png");
+        var second = Path.Combine(secondDir, "shot.png");
+        File.WriteAllBytes(first, [1]);
+        File.WriteAllBytes(second, [2]);
+        var workDir = Path.Combine(tempDir.Path, "work");
+        Directory.CreateDirectory(workDir);
+
+        var src = MakeMaterialSource("---\ntitle: Test\npublished: 2026-01-01\n---\nBody");
+        src.MediaPaths.Add(new MediaAsset("one/shot.png", first));
+        src.MediaPaths.Add(new MediaAsset("two/shot.png", second));
+
+        MakeGenerator().StageMedia(src, workDir,
+            "![A](one/shot.png)\n\n![B](two/shot.png)\n", new CollectingLogger());
+
+        Assert.Equal(2, Directory.GetFiles(Path.Combine(workDir, "media")).Length);
+    }
+
+    [Fact]
+    public void StageMedia_NoMedia_ReturnsMarkdownUnchanged()
+    {
+        using var tempDir = new TempDirectory();
+        var src = MakeMaterialSource("---\ntitle: Test\npublished: 2026-01-01\n---\nBody");
+
+        const string markdown = "Just text, no pictures.\n";
+        var result = MakeGenerator().StageMedia(src, tempDir.Path, markdown, new CollectingLogger());
+
+        Assert.Equal(markdown, result);
+        Assert.False(Directory.Exists(Path.Combine(tempDir.Path, "media")));
+    }
+
+    [Fact]
+    public async Task Generator_DocumentWithImage_HandsPandocAStagedPath()
+    {
+        using var tempDir = new TempDirectory();
+        var materials = Path.Combine(tempDir.Path, "Content", "Materials");
+        var templates = Path.Combine(tempDir.Path, "PdfTemplates", "default");
+        Directory.CreateDirectory(Path.Combine(materials, "media"));
+        Directory.CreateDirectory(templates);
+        await File.WriteAllTextAsync(Path.Combine(templates, "template.latex"), "$body$");
+        await File.WriteAllTextAsync(Path.Combine(tempDir.Path, ".mmdc.json"), "{}");
+        await File.WriteAllTextAsync(Path.Combine(tempDir.Path, "package-lock.json"), "{}");
+        await File.WriteAllBytesAsync(Path.Combine(materials, "media", "figure-1.png"),
+            [0x89, 0x50, 0x4E, 0x47]);
+        await File.WriteAllTextAsync(Path.Combine(materials, "lesson.md"),
+            "---\ntitle: Illustrated\npublished: 2026-03-01\n---\n\n![Shot](media/figure-1.png)\n");
+
+        var toolchain = new RecordingToolchainProvider(tempDir.Path);
+        var runner = new RecordingPdfProcessRunner();
+        var manifest = new PdfGenerationManifest();
+        var generator = new PdfGeneratorService(toolchain, runner, new NoOpMermaidRenderer(),
+            new PdfCacheService(toolchain), manifest, tempDir.Path);
+
+        await generator.RunAsync(NullLogger.Instance);
+
+        Assert.Equal(PdfGenerationStatus.Generated, manifest.GetResult("lesson")?.Status);
+        var markdown = Assert.Single(runner.MarkdownInputs);
+        Assert.DoesNotContain("](media/figure-1.png)", markdown);
+        Assert.Matches(@"\]\(media/[0-9a-f]{8}-figure-1\.png\)", markdown);
+    }
+
+    [Fact]
+    public async Task Generator_UnresolvedImage_FailsAndNamesTheReference()
+    {
+        using var tempDir = new TempDirectory();
+        var materials = Path.Combine(tempDir.Path, "Content", "Materials");
+        var templates = Path.Combine(tempDir.Path, "PdfTemplates", "default");
+        Directory.CreateDirectory(materials);
+        Directory.CreateDirectory(templates);
+        await File.WriteAllTextAsync(Path.Combine(templates, "template.latex"), "$body$");
+        await File.WriteAllTextAsync(Path.Combine(tempDir.Path, ".mmdc.json"), "{}");
+        await File.WriteAllTextAsync(Path.Combine(tempDir.Path, "package-lock.json"), "{}");
+        await File.WriteAllTextAsync(Path.Combine(materials, "lesson.md"),
+            "---\ntitle: Broken\npublished: 2026-03-01\n---\n\n![Shot](media/figur-1.png)\n");
+
+        var toolchain = new RecordingToolchainProvider(tempDir.Path);
+        var runner = new RecordingPdfProcessRunner();
+        var manifest = new PdfGenerationManifest();
+        var logger = new CollectingLogger();
+        var generator = new PdfGeneratorService(toolchain, runner, new NoOpMermaidRenderer(),
+            new PdfCacheService(toolchain), manifest, tempDir.Path);
+
+        await generator.RunAsync(logger);
+
+        Assert.Equal(PdfGenerationStatus.Failed, manifest.GetResult("lesson")?.Status);
+        Assert.Contains(logger.Warnings, w => w.Contains("media/figur-1.png"));
+        Assert.DoesNotContain(runner.Invocations, call => call.Executable == toolchain.PandocPath);
+    }
+
+    [Fact]
+    public async Task Generator_ImageSyntaxInsideCode_IsNotTreatedAsAnImage()
+    {
+        using var tempDir = new TempDirectory();
+        var materials = Path.Combine(tempDir.Path, "Content", "Materials");
+        var templates = Path.Combine(tempDir.Path, "PdfTemplates", "default");
+        Directory.CreateDirectory(materials);
+        Directory.CreateDirectory(templates);
+        await File.WriteAllTextAsync(Path.Combine(templates, "template.latex"), "$body$");
+        await File.WriteAllTextAsync(Path.Combine(tempDir.Path, ".mmdc.json"), "{}");
+        await File.WriteAllTextAsync(Path.Combine(tempDir.Path, "package-lock.json"), "{}");
+        await File.WriteAllTextAsync(Path.Combine(materials, "lesson.md"),
+            "---\ntitle: Teaching Markdown\npublished: 2026-03-01\n---\n\n" +
+            "Embed a picture with `![alt](inline/nope.png)`, like so:\n\n" +
+            "```markdown\n![alt](fenced/nope.png)\n```\n\nThat is all.\n");
+
+        var toolchain = new RecordingToolchainProvider(tempDir.Path);
+        var runner = new RecordingPdfProcessRunner();
+        var manifest = new PdfGenerationManifest();
+        var logger = new CollectingLogger();
+        var generator = new PdfGeneratorService(toolchain, runner, new NoOpMermaidRenderer(),
+            new PdfCacheService(toolchain), manifest, tempDir.Path);
+
+        await generator.RunAsync(logger);
+
+        Assert.Equal(PdfGenerationStatus.Generated, manifest.GetResult("lesson")?.Status);
+        Assert.Empty(logger.Warnings);
+        Assert.Contains("![alt](fenced/nope.png)", Assert.Single(runner.MarkdownInputs));
+    }
+
     // --- Helper: compute a deterministic test fingerprint ---
 
     private static string ComputeTestFingerprint(string slug, string markdown)
@@ -835,6 +1037,9 @@ public sealed class RecordingPdfProcessRunner : IProcessRunner
 {
     public List<(string Executable, string[] Args)> Invocations { get; } = new();
 
+    /// <summary>Markdown handed to Pandoc, which the work directory does not outlive.</summary>
+    public List<string> MarkdownInputs { get; } = new();
+
     public async Task<ProcessResult> RunAsync(string executable, string[] args,
         string? workingDirectory = null,
         Dictionary<string, string?>? environmentVariables = null,
@@ -844,6 +1049,7 @@ public sealed class RecordingPdfProcessRunner : IProcessRunner
         Invocations.Add((executable, args));
         if (executable == "fake-pandoc")
         {
+            MarkdownInputs.Add(await File.ReadAllTextAsync(args[^1], ct));
             var output = args[Array.IndexOf(args, "--output") + 1];
             await File.WriteAllTextAsync(output, "\\begin{document}ok\\end{document}", ct);
         }

@@ -167,8 +167,16 @@ foreach ($relativePath in $relativeMarkdownPaths) {
         if ($Force) {
             $arguments += '--force'
         }
-        & dotnet @arguments | Out-Null
+        # Capture stdout rather than discarding it: the renderer logs the reason a
+        # document failed there. Capturing stderr as well is not an option under
+        # Windows PowerShell, where 2>&1 on a native executable turns each stderr
+        # line into an error record and $ErrorActionPreference = 'Stop' then throws
+        # before the exit code is ever read.
+        $rendererOutput = & dotnet @arguments
         if ($LASTEXITCODE -ne 0) {
+            foreach ($line in $rendererOutput) {
+                Write-Output "      $line"
+            }
             throw "The shared renderer exited with code $LASTEXITCODE."
         }
 

@@ -22,8 +22,19 @@ internal class MaterialSource
     public MarkdownFrontMatter FrontMatter { get; init; } = new();
     public int BodyStart { get; init; }
     public string BodyMarkdown => BodyStart > 0 ? RawMarkdown[BodyStart..] : RawMarkdown;
-    public List<string> MediaPaths { get; init; } = new();
+    public List<MediaAsset> MediaPaths { get; init; } = new();
+    public List<string> UnresolvedMedia { get; init; } = new();
 }
+
+/// <summary>
+/// An image the body references, paired with the file it resolved to.
+/// <paramref name="Reference"/> is the path exactly as written in the Markdown,
+/// so it can be found again when the body is rewritten to point at the copy
+/// staged inside the work directory.
+/// </summary>
+/// <param name="Reference">Path as written in the Markdown.</param>
+/// <param name="SourcePath">Absolute path of the file it resolved to.</param>
+internal sealed record MediaAsset(string Reference, string SourcePath);
 
 public class PdfGeneratorService
 {
@@ -43,6 +54,10 @@ public class PdfGeneratorService
     private static readonly Regex FrontMatterBlock = new(
         @"\A(?:\uFEFF)?---\r?\n(?<yaml>.*?)\r?\n---\r?\n",
         RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex FencedCode = new(
+        @"^[ \t]*(`{3,}|~{3,})[^\n]*\n.*?(?:^[ \t]*\1[ \t]*\r?$|\z)",
+        RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex InlineCode = new(@"`[^`\n]*`", RegexOptions.Compiled);
 
     public PdfGeneratorService(
         IToolchainProvider toolchain,
@@ -221,6 +236,17 @@ public class PdfGeneratorService
             return;
         }
 
+        // An image LaTeX cannot open aborts the whole run, so say which one
+        // rather than letting Tectonic report it as a bare exit code.
+        if (src.UnresolvedMedia.Count > 0)
+        {
+            foreach (var reference in src.UnresolvedMedia)
+                logger.LogWarning("Image reference '{Ref}' in {Url} did not resolve to a file",
+                    reference, src.RouteUrl);
+            UpdateFallbackResult(src);
+            return;
+        }
+
         // Isolated work directory
         var workDir = Path.Combine(_toolchain.WorkDirectory, slug, fingerprint[..12]);
         try { Directory.CreateDirectory(workDir); } catch { }
@@ -310,6 +336,7 @@ public class PdfGeneratorService
 
             // Build augmented Markdown
             var augmentedMd = BuildAugmentedMarkdown(src, sectionsByKey, logger);
+            augmentedMd = StageMedia(src, workDir, augmentedMd, logger);
             var mdPath = Path.Combine(workDir, "document.md");
             await File.WriteAllTextAsync(mdPath, augmentedMd, ct);
 
@@ -481,7 +508,7 @@ public class PdfGeneratorService
         args.Add("--resource-path");
         args.Add(string.Join(Path.PathSeparator.ToString(),
             new[] { Path.GetDirectoryName(mdPath), srcDir }
-                .Concat(src.MediaPaths.Select(Path.GetDirectoryName))
+                .Concat(src.MediaPaths.Select(asset => Path.GetDirectoryName(asset.SourcePath)))
                 .OfType<string>()
                 .Distinct(StringComparer.OrdinalIgnoreCase)));
 
@@ -535,6 +562,7 @@ public class PdfGeneratorService
         {
             "-X", "compile",
             "--untrusted",
+            "--keep-logs",
             "--bundle", _toolchain.TectonicBundleUrl,
             "--outdir", workDir,
             texPath
@@ -551,8 +579,11 @@ public class PdfGeneratorService
         }
         if (result.ExitCode != 0)
         {
-            logger.LogWarning("Tectonic exit {Code}: {Err}",
-                result.ExitCode, Truncate(result.StdErr, 300));
+            logger.LogWarning("Tectonic exit {Code}: out='{StdOut}' err='{StdErr}' (log kept in {WorkDir})",
+                result.ExitCode,
+                Truncate(result.StdOut, 2000),
+                Truncate(result.StdErr, 2000),
+                workDir);
             return false;
         }
         return true;
@@ -575,6 +606,75 @@ public class PdfGeneratorService
         return fmBlock + augmentedBody;
     }
 
+    /// <summary>
+    /// Copies every image the body references into <paramref name="workDir"/> and
+    /// rewrites the references to point at those copies.
+    /// </summary>
+    /// <remarks>
+    /// Pandoc writes an image path into the LaTeX verbatim; it never moves the file.
+    /// Tectonic then runs with its working directory set to <paramref name="workDir"/>,
+    /// so a path such as <c>media/figure-1.png</c> resolves against the work directory
+    /// rather than against the document, and graphicx cannot find it. Staging the file
+    /// under a name that is valid where Tectonic will look for it is what closes that gap.
+    ///
+    /// Copies land flat in <c>media/</c> instead of mirroring the original tree, so a
+    /// reference that climbs out of the document's directory gets handled by the same
+    /// code as one that does not, and nothing lands outside the work directory.
+    /// </remarks>
+    internal string StageMedia(MaterialSource src, string workDir, string markdown, ILogger logger)
+    {
+        if (src.MediaPaths.Count == 0)
+            return markdown;
+
+        var stagedByReference = new Dictionary<string, string>(StringComparer.Ordinal);
+        var mediaDir = Path.Combine(workDir, "media");
+        Directory.CreateDirectory(mediaDir);
+
+        foreach (var asset in src.MediaPaths)
+        {
+            var stagedName = StagedMediaName(asset.SourcePath);
+            File.Copy(asset.SourcePath, Path.Combine(mediaDir, stagedName), overwrite: true);
+            stagedByReference[asset.Reference] = $"media/{stagedName}";
+            logger.LogDebug("Staged {Source} as media/{Name} for {Url}",
+                asset.SourcePath, stagedName, src.RouteUrl);
+        }
+
+        string Rewrite(Match match)
+        {
+            var group = match.Groups[1];
+            if (!stagedByReference.TryGetValue(group.Value, out var staged))
+                return match.Value;
+
+            // Replace only the captured path, leaving alt text, titles and any
+            // angle brackets around the path exactly as the author wrote them.
+            var start = group.Index - match.Index;
+            return match.Value[..start] + staged + match.Value[(start + group.Length)..];
+        }
+
+        return ImgSrc.Replace(MarkdownImage.Replace(markdown, Rewrite), Rewrite);
+    }
+
+    /// <summary>
+    /// Builds the file name a staged copy gets: a short hash of the source path,
+    /// which keeps same-named files from different directories apart, followed by
+    /// a name stripped of everything LaTeX finds awkward. Interior dots go too,
+    /// since graphicx picks an image's format from the last one it sees.
+    /// </summary>
+    private static string StagedMediaName(string sourcePath)
+    {
+        var hash = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                Encoding.UTF8.GetBytes(sourcePath))).ToLowerInvariant()[..8];
+
+        var extension = Path.GetExtension(sourcePath);
+        var name = new StringBuilder(Path.GetFileNameWithoutExtension(sourcePath));
+        for (var i = 0; i < name.Length; i++)
+            if (!char.IsAsciiLetterOrDigit(name[i]) && name[i] is not ('_' or '-'))
+                name[i] = '-';
+
+        return $"{hash}-{name}{extension}";
+    }
+
     private void UpdateFallbackResult(MaterialSource src)
     {
         var hasFallback = !string.IsNullOrWhiteSpace(src.FrontMatter.DownloadLink);
@@ -586,19 +686,36 @@ public class PdfGeneratorService
         });
     }
 
-    private List<string> ResolveMediaPaths(string sourceFile, string body)
+    private (List<MediaAsset> Resolved, List<string> Unresolved) ResolveMediaPaths(
+        string sourceFile, string body)
     {
-        var references = ImgSrc.Matches(body).Select(match => match.Groups[1].Value)
-            .Concat(MarkdownImage.Matches(body).Select(match => match.Groups[1].Value));
-        var media = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Code samples that happen to contain image syntax are prose about Markdown,
+        // not pictures to stage, and a made-up path inside one would otherwise fail
+        // the document. Drop code before looking for references.
+        var prose = InlineCode.Replace(FencedCode.Replace(body, ""), "");
+
+        var references = ImgSrc.Matches(prose).Select(match => match.Groups[1].Value)
+            .Concat(MarkdownImage.Matches(prose).Select(match => match.Groups[1].Value));
+        var resolved = new List<MediaAsset>();
+        var seenReferences = new HashSet<string>(StringComparer.Ordinal);
+        var unresolved = new List<string>();
         var sourceDirectory = Path.GetDirectoryName(sourceFile)!;
 
         foreach (var reference in references)
         {
-            var decoded = Uri.UnescapeDataString(reference.Split('#', '?')[0]);
-            if (string.IsNullOrWhiteSpace(decoded) ||
-                Uri.TryCreate(decoded, UriKind.Absolute, out _))
+            if (!seenReferences.Add(reference))
                 continue;
+
+            var decoded = Uri.UnescapeDataString(reference.Split('#', '?')[0]);
+            if (string.IsNullOrWhiteSpace(decoded))
+                continue;
+
+            // Remote images are never fetched, so they cannot be staged either.
+            if (Uri.TryCreate(decoded, UriKind.Absolute, out _))
+            {
+                unresolved.Add(reference);
+                continue;
+            }
 
             var candidates = decoded.StartsWith('/')
                 ? new[] { Path.Combine(_contentRoot, "wwwroot", decoded.TrimStart('/')) }
@@ -608,18 +725,18 @@ public class PdfGeneratorService
                     Path.Combine(_contentRoot, "wwwroot", decoded)
                 };
 
-            foreach (var candidate in candidates)
-            {
-                var fullPath = Path.GetFullPath(candidate);
-                if (File.Exists(fullPath))
-                {
-                    media.Add(fullPath);
-                    break;
-                }
-            }
+            var match = candidates
+                .Select(Path.GetFullPath)
+                .FirstOrDefault(File.Exists);
+
+            if (match is null)
+                unresolved.Add(reference);
+            else
+                resolved.Add(new MediaAsset(reference, match));
         }
 
-        return media.OrderBy(path => path, StringComparer.Ordinal).ToList();
+        return (resolved.OrderBy(asset => asset.SourcePath, StringComparer.Ordinal).ToList(),
+            unresolved);
     }
 
     private List<MaterialSource> DiscoverSources(ILogger logger)
@@ -666,7 +783,7 @@ public class PdfGeneratorService
                 var slug = Normalize(routeUrl);
 
                 var body = bodyStart > 0 ? raw[bodyStart..] : raw;
-                var media = ResolveMediaPaths(file, body);
+                var (media, unresolvedMedia) = ResolveMediaPaths(file, body);
 
                 sources.Add(new MaterialSource
                 {
@@ -676,7 +793,8 @@ public class PdfGeneratorService
                     RawMarkdown = raw,
                     FrontMatter = fm,
                     BodyStart = bodyStart,
-                    MediaPaths = media
+                    MediaPaths = media,
+                    UnresolvedMedia = unresolvedMedia
                 });
             }
             catch (Exception ex)
@@ -744,8 +862,10 @@ public class PdfGeneratorService
         if (File.Exists(mmdcPath))
             HashEntry(".mmdc.json", await File.ReadAllBytesAsync(mmdcPath, ct));
 
-        // Media paths (sorted)
-        foreach (var m in src.MediaPaths.OrderBy(x => x))
+        // Media paths (sorted, one entry per distinct file)
+        foreach (var m in src.MediaPaths.Select(asset => asset.SourcePath)
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(x => x, StringComparer.Ordinal))
             HashEntry($"media/{Path.GetRelativePath(_contentRoot, m)}",
                 await File.ReadAllBytesAsync(m, ct));
 
