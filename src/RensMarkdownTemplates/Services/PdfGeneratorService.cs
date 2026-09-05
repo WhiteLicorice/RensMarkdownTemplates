@@ -47,6 +47,9 @@ public class PdfGeneratorService
     private readonly string _materialsDirectory;
     private readonly IReadOnlyList<string>? _materialFiles;
     private readonly bool _includeDrafts;
+    private readonly bool _includeExternalDownloads;
+
+    internal const string ExternalDiagnostic = "External download link declared in frontmatter";
 
     private static readonly Regex ValidTemplate = new(@"^[a-z0-9][a-z0-9_-]*$", RegexOptions.Compiled);
     private static readonly Regex ImgSrc = new(@"<img[^>]+src=""([^""]+)""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -92,18 +95,31 @@ public class PdfGeneratorService
         _materialsDirectory = options.ResolveMaterialsDirectory();
         _materialFiles = options.MaterialFiles;
         _includeDrafts = options.IncludeDrafts;
+        _includeExternalDownloads = options.IncludeExternalDownloads;
     }
 
     public async Task RunAsync(ILogger logger, CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
-        var sources = DiscoverSources(logger);
+        var (sources, external) = DiscoverSources(logger);
         var activeSlugs = new HashSet<string>(sources.Select(s => s.Slug), StringComparer.OrdinalIgnoreCase);
+
+        // Publish the exempt documents first, so an all-exempt run still reports them
+        // and still prunes the artifacts they no longer own.
+        foreach (var src in external)
+            _manifest.SetResult(src.RouteUrl, new PdfGenerationResult
+            {
+                Status = PdfGenerationStatus.External,
+                RelativeUrl = null,
+                Diagnostic = ExternalDiagnostic
+            });
 
         if (sources.Count == 0)
         {
-            logger.LogInformation("No material files found. Skipping PDF generation.");
+            logger.LogInformation("No material files need generation. Skipping PDF generation.");
             await _cache.PruneAsync(activeSlugs, logger, ct);
+            sw.Stop();
+            LogSummary(logger, external.Count, sw.Elapsed);
             return;
         }
 
@@ -207,7 +223,7 @@ public class PdfGeneratorService
 
             await _cache.PruneAsync(activeSlugs, logger, ct);
             sw.Stop();
-            LogSummary(logger, sources.Count, sw.Elapsed);
+            LogSummary(logger, sources.Count + external.Count, sw.Elapsed);
         }
     }
 
@@ -739,14 +755,19 @@ public class PdfGeneratorService
             unresolved);
     }
 
-    private List<MaterialSource> DiscoverSources(ILogger logger)
+    /// <summary>
+    /// Splits the material directory into documents this pipeline generates and documents
+    /// a frontmatter <c>downloadLink</c> exempts from generation.
+    /// </summary>
+    private (List<MaterialSource> Sources, List<MaterialSource> External) DiscoverSources(ILogger logger)
     {
         var sources = new List<MaterialSource>();
+        var external = new List<MaterialSource>();
         var dir = _materialsDirectory;
         if (!Directory.Exists(dir))
         {
             logger.LogWarning("Materials directory not found: {Dir}", dir);
-            return sources;
+            return (sources, external);
         }
 
         var deser = new DeserializerBuilder()
@@ -785,7 +806,7 @@ public class PdfGeneratorService
                 var body = bodyStart > 0 ? raw[bodyStart..] : raw;
                 var (media, unresolvedMedia) = ResolveMediaPaths(file, body);
 
-                sources.Add(new MaterialSource
+                var source = new MaterialSource
                 {
                     RouteUrl = routeUrl,
                     Slug = slug,
@@ -795,7 +816,18 @@ public class PdfGeneratorService
                     BodyStart = bodyStart,
                     MediaPaths = media,
                     UnresolvedMedia = unresolvedMedia
-                });
+                };
+
+                // A declared downloadLink overrides the native PDF. That document owns its
+                // own download, so this pipeline does not generate an artifact for it.
+                if (!_includeExternalDownloads && !string.IsNullOrWhiteSpace(fm.DownloadLink))
+                {
+                    logger.LogDebug("Exempt from generation, downloadLink declared: {File}", file);
+                    external.Add(source);
+                    continue;
+                }
+
+                sources.Add(source);
             }
             catch (Exception ex)
             {
@@ -803,8 +835,9 @@ public class PdfGeneratorService
             }
         }
 
-        logger.LogInformation("Discovered {Count} non-draft materials", sources.Count);
-        return sources;
+        logger.LogInformation("Discovered {Count} non-draft materials, {External} exempt",
+            sources.Count, external.Count);
+        return (sources, external);
     }
 
     private async Task<string> ComputeFingerprintAsync(MaterialSource src, CancellationToken ct)
@@ -924,11 +957,12 @@ public class PdfGeneratorService
     {
         var results = _manifest.AllResults;
 
-        int gen = 0, cached = 0, fallback = 0, unavailable = 0;
+        int gen = 0, cached = 0, external = 0, fallback = 0, unavailable = 0;
         foreach (var r in results.Values)
         {
             if (r.Status == PdfGenerationStatus.Generated) gen++;
             else if (r.Status == PdfGenerationStatus.Cached) cached++;
+            else if (r.Status == PdfGenerationStatus.External) external++;
             else if (r.Status == PdfGenerationStatus.Failed)
             {
                 if (r.Diagnostic?.StartsWith("Fallback available", StringComparison.Ordinal) == true) fallback++;
@@ -937,8 +971,8 @@ public class PdfGeneratorService
         }
 
         logger.LogInformation(
-            "PDF gen: {T} docs, {G} gen, {C} cached, {F} fallback, {U} unavailable [{E}]",
-            total, gen, cached, fallback, unavailable, elapsed);
+            "PDF gen: {T} docs, {G} gen, {C} cached, {X} external, {F} fallback, {U} unavailable [{E}]",
+            total, gen, cached, external, fallback, unavailable, elapsed);
 
         if (fallback > 0 || unavailable > 0)
         {
@@ -960,6 +994,7 @@ public class PdfGeneratorService
                 sb.AppendLine("|--------|-------|");
                 sb.AppendLine($"| ✅ Generated | {gen} |");
                 sb.AppendLine($"| 💾 Cached | {cached} |");
+                sb.AppendLine($"| 🔗 External | {external} |");
                 sb.AppendLine($"| ⚠️ Fallback | {fallback} |");
                 sb.AppendLine($"| ❌ Unavailable | {unavailable} |");
                 sb.AppendLine();

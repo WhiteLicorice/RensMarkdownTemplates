@@ -14,5 +14,6 @@ public enum PdfGenerationStatus
 {
     Generated,
     Cached,
-    Failed
+    Failed,
+    External
 }

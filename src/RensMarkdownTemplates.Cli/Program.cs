@@ -51,6 +51,7 @@ var options = new PdfGeneratorOptions
     MaterialsDirectory = Path.GetDirectoryName(input)!,
     MaterialFiles = [input],
     IncludeDrafts = true,
+    IncludeExternalDownloads = true,
     OutputDirectory = generatedRoot,
     ArtifactsDirectory = cacheRoot
 };

@@ -7,6 +7,7 @@ public sealed class PdfGeneratorOptions
     public string MaterialsDirectory { get; init; } = Path.Combine("Content", "Materials");
     public IReadOnlyList<string>? MaterialFiles { get; init; }
     public bool IncludeDrafts { get; init; }
+    public bool IncludeExternalDownloads { get; init; }
     public string OutputDirectory { get; init; } = Path.Combine("wwwroot", "pdfs");
     public string ArtifactsDirectory { get; init; } = "artifacts";
 

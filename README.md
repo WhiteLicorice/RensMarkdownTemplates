@@ -56,6 +56,7 @@ authors:
     gitHubUserName: WhiteLicorice
     nickname: Ren
 isDraft: false
+downloadLink: https://drive.google.com/drive/folders/example
 submissions:
   - name: Source code
     link: https://example.com/submission
@@ -73,6 +74,18 @@ pdf:
 The `pdf` block is optional. `pdf.template` selects a directory under `templates/` and
 defaults to `default`. Entries in `pdf.variables` become
 `$pdf.variables.<name>$` values in the Pandoc template.
+
+`downloadLink` is optional and exempts one document from generation. A document without
+it takes the default path, and the pipeline generates a native PDF. A document with it
+owns its own download. The pipeline skips that document, reports it as
+`PdfGenerationStatus.External`, and prunes any PDF the document held before. Use it when
+an external location carries more than the PDF, such as a folder that bundles starter
+files. A blank or whitespace value counts as absent.
+
+Batch discovery applies the exemption. An explicit single-document render does not,
+because `render --input` names the document itself. Set
+`PdfGeneratorOptions.IncludeExternalDownloads` to `true` for the same override in a
+library call.
 
 ## Mermaid diagrams
 

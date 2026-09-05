@@ -162,8 +162,9 @@ public class PdfGenerationTests
     // --- Download resolution (component logic tests) ---
 
     [Fact]
-    public void GeneratedResult_OverridesDownloadLink()
+    public void GeneratedResult_ResolvesToTheGeneratedPdf()
     {
+        // A document without downloadLink takes the default path.
         var manifest = new PdfGenerationManifest();
         manifest.SetResult("test-post", new PdfGenerationResult
         {
@@ -182,24 +183,27 @@ public class PdfGenerationTests
     }
 
     [Fact]
-    public void FailedResult_FallsBackToDownloadLink()
+    public void ExternalResult_ResolvesToTheDownloadLink()
     {
-        const string fallbackLink = "https://drive.google.com/example.pdf";
+        // A document with downloadLink is exempt, so the manifest carries no artifact.
+        const string externalLink = "https://drive.google.com/example.pdf";
 
         var manifest = new PdfGenerationManifest();
         manifest.SetResult("test-post", new PdfGenerationResult
         {
-            Status = PdfGenerationStatus.Failed,
-            Diagnostic = "Pandoc not found"
+            Status = PdfGenerationStatus.External,
+            Diagnostic = "External download link declared in frontmatter"
         });
 
         var result = manifest.GetResult("test-post");
         var hasGenerated = result?.Status is PdfGenerationStatus.Generated or PdfGenerationStatus.Cached
             && result?.RelativeUrl is not null;
-        var hasFallback = !string.IsNullOrWhiteSpace(fallbackLink);
+        var hasExternal = !string.IsNullOrWhiteSpace(externalLink);
 
+        Assert.Equal(PdfGenerationStatus.External, result!.Status);
+        Assert.Null(result.RelativeUrl);
         Assert.False(hasGenerated);
-        Assert.True(hasFallback);
+        Assert.True(hasExternal);
     }
 
     [Fact]
@@ -378,7 +382,7 @@ public class PdfGenerationTests
         await File.WriteAllTextAsync(Path.Combine(tempDir.Path, ".mmdc.json"), "{}");
         await File.WriteAllTextAsync(Path.Combine(tempDir.Path, "package-lock.json"), "{}");
         await File.WriteAllTextAsync(Path.Combine(materials, "lesson.md"),
-            "---\ntitle: Nested lesson\npublished: 2026-03-01\ndownloadLink: https://example.com/fallback.pdf\n---\n\nBody\n");
+            "---\ntitle: Nested lesson\npublished: 2026-03-01\n---\n\nBody\n");
 
         var toolchain = new RecordingToolchainProvider(tempDir.Path);
         var runner = new RecordingPdfProcessRunner();
@@ -789,6 +793,175 @@ public class PdfGenerationTests
         Assert.Equal(PdfGenerationStatus.Generated, manifest.GetResult("lesson")?.Status);
         Assert.Empty(logger.Warnings);
         Assert.Contains("![alt](fenced/nope.png)", Assert.Single(runner.MarkdownInputs));
+    }
+
+    // --- External download exemption ---
+
+    private static async Task WriteMinimalPipelineAsync(string root)
+    {
+        Directory.CreateDirectory(Path.Combine(root, "Content", "Materials"));
+        Directory.CreateDirectory(Path.Combine(root, "PdfTemplates", "default"));
+        await File.WriteAllTextAsync(
+            Path.Combine(root, "PdfTemplates", "default", "template.latex"), "$body$");
+        await File.WriteAllTextAsync(Path.Combine(root, ".mmdc.json"), "{}");
+        await File.WriteAllTextAsync(Path.Combine(root, "package-lock.json"), "{}");
+    }
+
+    [Fact]
+    public async Task Generator_MaterialWithDownloadLink_IsExemptFromGeneration()
+    {
+        using var tempDir = new TempDirectory();
+        await WriteMinimalPipelineAsync(tempDir.Path);
+        var materials = Path.Combine(tempDir.Path, "Content", "Materials");
+        await File.WriteAllTextAsync(Path.Combine(materials, "bundled.md"),
+            "---\ntitle: Bundled\npublished: 2026-03-01\ndownloadLink: https://drive.example/folder\n---\n\nBody\n");
+
+        var toolchain = new RecordingToolchainProvider(tempDir.Path);
+        var runner = new RecordingPdfProcessRunner();
+        var manifest = new PdfGenerationManifest();
+        var logger = new CollectingLogger();
+        var generator = new PdfGeneratorService(toolchain, runner, new NoOpMermaidRenderer(),
+            new PdfCacheService(toolchain), manifest, tempDir.Path);
+
+        await generator.RunAsync(logger);
+
+        Assert.Equal(PdfGenerationStatus.External, manifest.GetResult("bundled")?.Status);
+        Assert.Null(manifest.GetResult("bundled")?.RelativeUrl);
+        Assert.Empty(runner.Invocations);
+        Assert.Equal(0, toolchain.BootstrapCount);
+        Assert.Empty(logger.Warnings);
+    }
+
+    [Fact]
+    public async Task Generator_ExplicitIncludeExternalDownloads_StillGenerates()
+    {
+        using var tempDir = new TempDirectory();
+        await WriteMinimalPipelineAsync(tempDir.Path);
+        var materials = Path.Combine(tempDir.Path, "Content", "Materials");
+        await File.WriteAllTextAsync(Path.Combine(materials, "bundled.md"),
+            "---\ntitle: Bundled\npublished: 2026-03-01\ndownloadLink: https://drive.example/folder\n---\n\nBody\n");
+
+        var toolchain = new RecordingToolchainProvider(tempDir.Path);
+        var runner = new RecordingPdfProcessRunner();
+        var manifest = new PdfGenerationManifest();
+        var generator = new PdfGeneratorService(toolchain, runner, new NoOpMermaidRenderer(),
+            new PdfCacheService(toolchain), manifest,
+            new PdfGeneratorOptions
+            {
+                ContentRoot = tempDir.Path,
+                PipelineRoot = tempDir.Path,
+                IncludeExternalDownloads = true
+            });
+
+        await generator.RunAsync(NullLogger.Instance);
+
+        Assert.Equal(PdfGenerationStatus.Generated, manifest.GetResult("bundled")?.Status);
+        Assert.Contains(runner.Invocations, call => call.Executable == toolchain.PandocPath);
+    }
+
+    [Fact]
+    public async Task Generator_BlankDownloadLink_IsNotAnExemption()
+    {
+        using var tempDir = new TempDirectory();
+        await WriteMinimalPipelineAsync(tempDir.Path);
+        var materials = Path.Combine(tempDir.Path, "Content", "Materials");
+        await File.WriteAllTextAsync(Path.Combine(materials, "blank.md"),
+            "---\ntitle: Blank\npublished: 2026-03-01\ndownloadLink: \"   \"\n---\n\nBody\n");
+
+        var toolchain = new RecordingToolchainProvider(tempDir.Path);
+        var runner = new RecordingPdfProcessRunner();
+        var manifest = new PdfGenerationManifest();
+        var generator = new PdfGeneratorService(toolchain, runner, new NoOpMermaidRenderer(),
+            new PdfCacheService(toolchain), manifest, tempDir.Path);
+
+        await generator.RunAsync(NullLogger.Instance);
+
+        Assert.Equal(PdfGenerationStatus.Generated, manifest.GetResult("blank")?.Status);
+    }
+
+    [Fact]
+    public async Task Generator_MixedDirectory_GeneratesOneAndExemptsTheOther()
+    {
+        using var tempDir = new TempDirectory();
+        await WriteMinimalPipelineAsync(tempDir.Path);
+        var materials = Path.Combine(tempDir.Path, "Content", "Materials");
+        await File.WriteAllTextAsync(Path.Combine(materials, "native.md"),
+            "---\ntitle: Native\npublished: 2026-03-01\n---\n\nBody\n");
+        await File.WriteAllTextAsync(Path.Combine(materials, "bundled.md"),
+            "---\ntitle: Bundled\npublished: 2026-03-01\ndownloadLink: https://drive.example/folder\n---\n\nBody\n");
+
+        var toolchain = new RecordingToolchainProvider(tempDir.Path);
+        var runner = new RecordingPdfProcessRunner();
+        var manifest = new PdfGenerationManifest();
+        var generator = new PdfGeneratorService(toolchain, runner, new NoOpMermaidRenderer(),
+            new PdfCacheService(toolchain), manifest, tempDir.Path);
+
+        await generator.RunAsync(NullLogger.Instance);
+
+        Assert.Equal(PdfGenerationStatus.Generated, manifest.GetResult("native")?.Status);
+        Assert.Equal(PdfGenerationStatus.External, manifest.GetResult("bundled")?.Status);
+        var markdown = Assert.Single(runner.MarkdownInputs);
+        Assert.Contains("Native", markdown);
+    }
+
+    [Fact]
+    public async Task Generator_MaterialThatBecomesExempt_LosesItsGeneratedPdf()
+    {
+        using var tempDir = new TempDirectory();
+        await WriteMinimalPipelineAsync(tempDir.Path);
+        var materials = Path.Combine(tempDir.Path, "Content", "Materials");
+        var lesson = Path.Combine(materials, "lesson.md");
+        await File.WriteAllTextAsync(lesson,
+            "---\ntitle: Lesson\npublished: 2026-03-01\n---\n\nBody\n");
+
+        var toolchain = new RecordingToolchainProvider(tempDir.Path);
+        var runner = new RecordingPdfProcessRunner();
+        var cache = new PdfCacheService(toolchain);
+        var firstManifest = new PdfGenerationManifest();
+
+        await new PdfGeneratorService(toolchain, runner, new NoOpMermaidRenderer(),
+            cache, firstManifest, tempDir.Path).RunAsync(NullLogger.Instance);
+
+        var generated = firstManifest.GetResult("lesson");
+        Assert.Equal(PdfGenerationStatus.Generated, generated?.Status);
+        var pdfPath = Path.Combine(toolchain.OutputDirectory,
+            Path.GetFileName(generated!.RelativeUrl!));
+        Assert.True(File.Exists(pdfPath));
+
+        await File.WriteAllTextAsync(lesson,
+            "---\ntitle: Lesson\npublished: 2026-03-01\ndownloadLink: https://drive.example/folder\n---\n\nBody\n");
+
+        var secondManifest = new PdfGenerationManifest();
+        await new PdfGeneratorService(toolchain, runner, new NoOpMermaidRenderer(),
+            cache, secondManifest, tempDir.Path).RunAsync(NullLogger.Instance);
+
+        Assert.Equal(PdfGenerationStatus.External, secondManifest.GetResult("lesson")?.Status);
+        Assert.False(File.Exists(pdfPath));
+        Assert.Empty(Directory.GetFiles(toolchain.CacheStateDirectory, "*.json"));
+    }
+
+    [Fact]
+    public async Task Generator_EveryMaterialExempt_StillReportsAndPrunes()
+    {
+        using var tempDir = new TempDirectory();
+        await WriteMinimalPipelineAsync(tempDir.Path);
+        var materials = Path.Combine(tempDir.Path, "Content", "Materials");
+        await File.WriteAllTextAsync(Path.Combine(materials, "bundled.md"),
+            "---\ntitle: Bundled\npublished: 2026-03-01\ndownloadLink: https://drive.example/folder\n---\n\nBody\n");
+
+        var toolchain = new RecordingToolchainProvider(tempDir.Path);
+        Directory.CreateDirectory(toolchain.OutputDirectory);
+        Directory.CreateDirectory(toolchain.CacheStateDirectory);
+        var orphan = Path.Combine(toolchain.OutputDirectory, "bundled.deadbeef1234.pdf");
+        await File.WriteAllTextAsync(orphan, "%PDF-1.7\n");
+
+        var manifest = new PdfGenerationManifest();
+        await new PdfGeneratorService(toolchain, new RecordingPdfProcessRunner(),
+            new NoOpMermaidRenderer(), new PdfCacheService(toolchain), manifest,
+            tempDir.Path).RunAsync(NullLogger.Instance);
+
+        Assert.Equal(PdfGenerationStatus.External, manifest.GetResult("bundled")?.Status);
+        Assert.False(File.Exists(orphan));
     }
 
     // --- Helper: compute a deterministic test fingerprint ---
