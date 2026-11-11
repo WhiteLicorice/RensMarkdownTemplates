@@ -38,6 +38,31 @@ Repository-wide consumers should call `scripts/Convert-All.ps1`, which retains t
 course-materials repository's Git-aware discovery, `.pdfignore`, `<!--no-pdf-->`,
 Marp exclusions, adjacent output, and source/pipeline hash cache.
 
+## Tectonic cache and offline runs
+
+Tectonic reads its package cache from `<pipeline-root>/artifacts/tectonic-cache` by
+default. That path derives from the pipeline root, not from the artifacts directory.
+Set `PDF_TECTONIC_ONLY_CACHED=1` to pass `--only-cached` to Tectonic. The run then uses
+only cached resources and never fetches the bundle. Set `PDF_TECTONIC_CACHE_DIR` to one
+cache path to share it between worktrees. Both settings default to today's behavior.
+
+Render one document from a warm cache with no network:
+
+```powershell
+$env:PDF_TECTONIC_ONLY_CACHED = "1"
+$env:PDF_TECTONIC_CACHE_DIR = "path/to/tectonic-cache"
+dotnet run --project src/RensMarkdownTemplates.Cli -- render `
+  --input path/to/material.md `
+  --output path/to/material.pdf `
+  --content-root path/to/consumer `
+  --cache-root path/to/consumer/.cache `
+  --pipeline-root .
+```
+
+A library caller sets `PdfGeneratorOptions.OnlyCachedTectonic` and
+`PdfGeneratorOptions.TectonicCacheDirectory` instead. An incomplete cache fails the run.
+The log then names the cached resource Tectonic could not read.
+
 ## Canonical frontmatter
 
 Both consumers accept the same YAML frontmatter. Fields used only by the course site

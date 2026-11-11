@@ -10,6 +10,8 @@ public sealed class PdfGeneratorOptions
     public bool IncludeExternalDownloads { get; init; }
     public string OutputDirectory { get; init; } = Path.Combine("wwwroot", "pdfs");
     public string ArtifactsDirectory { get; init; } = "artifacts";
+    public bool OnlyCachedTectonic { get; init; }
+    public string? TectonicCacheDirectory { get; init; }
 
     public string ResolveMaterialsDirectory() => ResolveFromContentRoot(MaterialsDirectory);
     public string ResolveOutputDirectory() => ResolveFromContentRoot(OutputDirectory);

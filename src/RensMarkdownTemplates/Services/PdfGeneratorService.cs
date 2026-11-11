@@ -48,8 +48,12 @@ public class PdfGeneratorService
     private readonly IReadOnlyList<string>? _materialFiles;
     private readonly bool _includeDrafts;
     private readonly bool _includeExternalDownloads;
+    private readonly bool _onlyCachedTectonic;
+    private readonly string? _tectonicCacheDirectory;
 
     internal const string ExternalDiagnostic = "External download link declared in frontmatter";
+    internal const string OnlyCachedEnvironmentVariable = "PDF_TECTONIC_ONLY_CACHED";
+    internal const string CacheDirectoryEnvironmentVariable = "PDF_TECTONIC_CACHE_DIR";
 
     private static readonly Regex ValidTemplate = new(@"^[a-z0-9][a-z0-9_-]*$", RegexOptions.Compiled);
     private static readonly Regex ImgSrc = new(@"<img[^>]+src=""([^""]+)""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -96,7 +100,19 @@ public class PdfGeneratorService
         _materialFiles = options.MaterialFiles;
         _includeDrafts = options.IncludeDrafts;
         _includeExternalDownloads = options.IncludeExternalDownloads;
+        _onlyCachedTectonic = options.OnlyCachedTectonic ||
+            IsEnabled(Environment.GetEnvironmentVariable(OnlyCachedEnvironmentVariable));
+        var configuredCache = string.IsNullOrWhiteSpace(options.TectonicCacheDirectory)
+            ? Environment.GetEnvironmentVariable(CacheDirectoryEnvironmentVariable)
+            : options.TectonicCacheDirectory;
+        _tectonicCacheDirectory = string.IsNullOrWhiteSpace(configuredCache)
+            ? null
+            : configuredCache;
     }
+
+    private static bool IsEnabled(string? value) =>
+        string.Equals(value, "1", StringComparison.Ordinal) ||
+        string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
 
     public async Task RunAsync(ILogger logger, CancellationToken ct = default)
     {
@@ -564,27 +580,22 @@ public class PdfGeneratorService
         var tectonic = _toolchain.TectonicPath;
         if (tectonic is null) return false;
 
-        var cacheDir = Path.Combine(
-            Path.GetDirectoryName(_toolchain.PuppeteerCachePath) ?? "artifacts",
-            "tectonic-cache");
+        var cacheDir = _tectonicCacheDirectory is { Length: > 0 }
+            ? Path.GetFullPath(_tectonicCacheDirectory)
+            : Path.Combine(
+                Path.GetDirectoryName(_toolchain.PuppeteerCachePath) ?? "artifacts",
+                "tectonic-cache");
         Directory.CreateDirectory(cacheDir);
 
         var env = new Dictionary<string, string?>
         {
-            ["TECTONIC_CACHE_DIR"] = Path.GetFullPath(cacheDir)
+            ["TECTONIC_CACHE_DIR"] = cacheDir
         };
 
-        var args = new List<string>
-        {
-            "-X", "compile",
-            "--untrusted",
-            "--keep-logs",
-            "--bundle", _toolchain.TectonicBundleUrl,
-            "--outdir", workDir,
-            texPath
-        };
+        var args = BuildTectonicArguments(
+            texPath, workDir, _toolchain.TectonicBundleUrl, _onlyCachedTectonic);
 
-        var result = await _processRunner.RunAsync(tectonic, args.ToArray(),
+        var result = await _processRunner.RunAsync(tectonic, args,
             workingDirectory: workDir, environmentVariables: env,
             timeoutMs: 180_000, ct: ct);
 
@@ -600,9 +611,40 @@ public class PdfGeneratorService
                 Truncate(result.StdOut, 2000),
                 Truncate(result.StdErr, 2000),
                 workDir);
+
+            var missing = FirstTectonicError(result.StdErr);
+            if (missing is not null)
+                logger.LogWarning("Tectonic could not read a cached resource: {Error}", missing);
             return false;
         }
         return true;
+    }
+
+    internal static string[] BuildTectonicArguments(string texPath, string workDir,
+        string bundleUrl, bool onlyCached)
+    {
+        var args = new List<string> { "-X", "compile" };
+        if (onlyCached)
+            args.Add("--only-cached");
+        args.Add("--untrusted");
+        args.Add("--keep-logs");
+        args.Add("--bundle");
+        args.Add(bundleUrl);
+        args.Add("--outdir");
+        args.Add(workDir);
+        args.Add(texPath);
+        return args.ToArray();
+    }
+
+    internal static string? FirstTectonicError(string stderr)
+    {
+        foreach (var line in stderr.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("error:", StringComparison.OrdinalIgnoreCase))
+                return trimmed;
+        }
+        return null;
     }
 
     internal string BuildAugmentedMarkdown(MaterialSource src, Dictionary<string, string> sectionsByKey, ILogger logger)
