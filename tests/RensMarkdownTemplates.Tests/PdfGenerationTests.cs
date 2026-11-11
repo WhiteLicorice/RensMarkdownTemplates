@@ -393,7 +393,7 @@ public class PdfGenerationTests
 
         await first.RunAsync(NullLogger.Instance);
 
-        var generated = firstManifest.GetResult("nested/lesson");
+        var generated = firstManifest.GetResult("lesson");
         Assert.NotNull(generated);
         Assert.Equal(PdfGenerationStatus.Generated, generated.Status);
         Assert.True(File.Exists(Path.Combine(toolchain.OutputDirectory,
@@ -411,9 +411,88 @@ public class PdfGenerationTests
         await second.RunAsync(NullLogger.Instance);
 
         Assert.Equal(PdfGenerationStatus.Cached,
-            secondManifest.GetResult("nested/lesson")?.Status);
+            secondManifest.GetResult("lesson")?.Status);
         Assert.Equal(1, toolchain.BootstrapCount);
         Assert.Empty(runner.Invocations);
+    }
+
+    [Fact]
+    public async Task Generator_NestedMaterial_PublishesTheFileStemAsTheRoute()
+    {
+        using var tempDir = new TempDirectory();
+        await WriteMinimalPipelineAsync(tempDir.Path);
+        var materials = Path.Combine(tempDir.Path, "Content", "Materials");
+        var nested = Path.Combine(materials, "cmsc-124", "lab0");
+        Directory.CreateDirectory(nested);
+        await File.WriteAllTextAsync(Path.Combine(nested, "cmsc-124-lab0.md"),
+            "---\ntitle: Nested lesson\npublished: 2026-03-01\n---\n\nBody\n");
+
+        var toolchain = new RecordingToolchainProvider(tempDir.Path);
+        var runner = new RecordingPdfProcessRunner();
+        var manifest = new PdfGenerationManifest();
+        var generator = new PdfGeneratorService(toolchain, runner, new NoOpMermaidRenderer(),
+            new PdfCacheService(toolchain), manifest, tempDir.Path);
+
+        await generator.RunAsync(NullLogger.Instance);
+
+        var generated = manifest.GetResult("cmsc-124-lab0");
+        Assert.NotNull(generated);
+        Assert.Equal(PdfGenerationStatus.Generated, generated.Status);
+        Assert.Null(manifest.GetResult("cmsc-124/lab0/cmsc-124-lab0"));
+        Assert.StartsWith("cmsc-124-lab0.", Path.GetFileName(generated.RelativeUrl!));
+    }
+
+    [Fact]
+    public async Task Generator_NestedMaterial_StagesTheImageBesideIt()
+    {
+        using var tempDir = new TempDirectory();
+        await WriteMinimalPipelineAsync(tempDir.Path);
+        var materials = Path.Combine(tempDir.Path, "Content", "Materials");
+        var nested = Path.Combine(materials, "cmsc-124", "lab0");
+        Directory.CreateDirectory(Path.Combine(nested, "media"));
+        await File.WriteAllBytesAsync(Path.Combine(nested, "media", "figure-1.png"),
+            [0x89, 0x50, 0x4E, 0x47]);
+        await File.WriteAllTextAsync(Path.Combine(nested, "cmsc-124-lab0.md"),
+            "---\ntitle: Nested lesson\npublished: 2026-03-01\n---\n\n![Shot](media/figure-1.png)\n");
+
+        var toolchain = new RecordingToolchainProvider(tempDir.Path);
+        var runner = new RecordingPdfProcessRunner();
+        var manifest = new PdfGenerationManifest();
+        var generator = new PdfGeneratorService(toolchain, runner, new NoOpMermaidRenderer(),
+            new PdfCacheService(toolchain), manifest, tempDir.Path);
+
+        await generator.RunAsync(NullLogger.Instance);
+
+        Assert.Equal(PdfGenerationStatus.Generated,
+            manifest.GetResult("cmsc-124-lab0")?.Status);
+        var markdown = Assert.Single(runner.MarkdownInputs);
+        Assert.DoesNotContain("](media/figure-1.png)", markdown);
+        Assert.Matches(@"\]\(media/[0-9a-f]{8}-figure-1\.png\)", markdown);
+    }
+
+    [Fact]
+    public async Task Generator_TwoMaterialsSharingAFileName_FailsAndNamesBothPaths()
+    {
+        using var tempDir = new TempDirectory();
+        await WriteMinimalPipelineAsync(tempDir.Path);
+        var materials = Path.Combine(tempDir.Path, "Content", "Materials");
+        var first = Path.Combine(materials, "cmsc-124", "lab0", "lesson.md");
+        var second = Path.Combine(materials, "cmsc-124", "lab1", "lesson.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(first)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(second)!);
+        await File.WriteAllTextAsync(first, "---\ntitle: First\npublished: 2026-03-01\n---\nBody\n");
+        await File.WriteAllTextAsync(second, "---\ntitle: Second\npublished: 2026-03-01\n---\nBody\n");
+
+        var toolchain = new RecordingToolchainProvider(tempDir.Path);
+        var generator = new PdfGeneratorService(toolchain, new RecordingPdfProcessRunner(),
+            new NoOpMermaidRenderer(), new PdfCacheService(toolchain),
+            new PdfGenerationManifest(), tempDir.Path);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => generator.RunAsync(NullLogger.Instance));
+
+        Assert.Contains(first, exception.Message);
+        Assert.Contains(second, exception.Message);
     }
 
     [Fact]

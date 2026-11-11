@@ -799,8 +799,8 @@ public class PdfGeneratorService
                 }
 
                 var relativePath = Path.GetRelativePath(dir, file);
-                var routeUrl = Path.ChangeExtension(relativePath, null)!
-                    .Replace('\\', '/');
+                var routeUrl = RouteName(Path.ChangeExtension(relativePath, null)!
+                    .Replace('\\', '/'));
                 var slug = Normalize(routeUrl);
 
                 var body = bodyStart > 0 ? raw[bodyStart..] : raw;
@@ -835,9 +835,34 @@ public class PdfGeneratorService
             }
         }
 
+        var duplicate = sources.Concat(external)
+            .GroupBy(m => m.Slug, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+        {
+            var paths = string.Join(" and ", duplicate.Select(m => m.SourcePath));
+            throw new InvalidOperationException(
+                $"Two materials share the file name '{duplicate.Key}': {paths}. Rename one of them.");
+        }
+
         logger.LogInformation("Discovered {Count} non-draft materials, {External} exempt",
             sources.Count, external.Count);
         return (sources, external);
+    }
+
+    /// <summary>
+    /// The site publishes every article at <c>articles/&lt;file name&gt;</c>, so a
+    /// material nested at <c>&lt;course&gt;/&lt;material&gt;/&lt;name&gt;.md</c> keeps the
+    /// same manifest key and PDF name as a flat <c>&lt;name&gt;.md</c>. Mirrors
+    /// BlazorStatic, which strips a trailing <c>/index</c> from the route.
+    /// </summary>
+    private static string RouteName(string relativePathWithoutExtension)
+    {
+        var route = relativePathWithoutExtension;
+        if (route.EndsWith("/index", StringComparison.Ordinal))
+            route = route[..^"/index".Length];
+        var slash = route.LastIndexOf('/');
+        return slash >= 0 ? route[(slash + 1)..] : route;
     }
 
     private async Task<string> ComputeFingerprintAsync(MaterialSource src, CancellationToken ct)
