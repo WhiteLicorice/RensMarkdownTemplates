@@ -110,7 +110,7 @@ public class PdfGeneratorService
             : configuredCache;
     }
 
-    private static bool IsEnabled(string? value) =>
+    internal static bool IsEnabled(string? value) =>
         string.Equals(value, "1", StringComparison.Ordinal) ||
         string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
 
@@ -381,11 +381,10 @@ public class PdfGeneratorService
                 return;
             }
 
-            // Tectonic: LaTeX → PDF
-            var tectonicOk = await RunTectonicAsync(texPath, workDir, logger, ct);
-            if (!tectonicOk)
+            var tectonicError = await RunTectonicAsync(texPath, workDir, logger, ct);
+            if (tectonicError is not null)
             {
-                UpdateFallbackResult(src);
+                UpdateFallbackResult(src, tectonicError);
                 return;
             }
 
@@ -574,11 +573,11 @@ public class PdfGeneratorService
         return true;
     }
 
-    private async Task<bool> RunTectonicAsync(string texPath, string workDir,
+    private async Task<string?> RunTectonicAsync(string texPath, string workDir,
         ILogger logger, CancellationToken ct)
     {
         var tectonic = _toolchain.TectonicPath;
-        if (tectonic is null) return false;
+        if (tectonic is null) return "Tectonic is not available.";
 
         var cacheDir = _tectonicCacheDirectory is { Length: > 0 }
             ? Path.GetFullPath(_tectonicCacheDirectory)
@@ -602,7 +601,7 @@ public class PdfGeneratorService
         if (result.TimedOut)
         {
             logger.LogWarning("Tectonic timed out for {Tex}", texPath);
-            return false;
+            return "Tectonic timed out.";
         }
         if (result.ExitCode != 0)
         {
@@ -612,12 +611,12 @@ public class PdfGeneratorService
                 Truncate(result.StdErr, 2000),
                 workDir);
 
-            var missing = FirstTectonicError(result.StdErr);
-            if (missing is not null)
-                logger.LogWarning("Tectonic could not read a cached resource: {Error}", missing);
-            return false;
+            var diagnostic = DescribeTectonicFailure(result.StdErr);
+            if (diagnostic is not null)
+                logger.LogWarning("Tectonic could not read a cached resource: {Error}", diagnostic);
+            return diagnostic ?? $"Tectonic exit {result.ExitCode}.";
         }
-        return true;
+        return null;
     }
 
     internal static string[] BuildTectonicArguments(string texPath, string workDir,
@@ -636,13 +635,31 @@ public class PdfGeneratorService
         return args.ToArray();
     }
 
-    internal static string? FirstTectonicError(string stderr)
+    internal static string? DescribeTectonicFailure(string stderr)
     {
-        foreach (var line in stderr.Split('\n'))
+        var firstError = FirstMatchingLine(stderr,
+            line => line.StartsWith("error:", StringComparison.OrdinalIgnoreCase));
+
+        foreach (var token in new[] { ".pfb", ".vf", ".tfm", ".otf", ".ttf", ".index.gz" })
         {
-            var trimmed = line.Trim();
-            if (trimmed.StartsWith("error:", StringComparison.OrdinalIgnoreCase))
-                return trimmed;
+            var resource = FirstMatchingLine(stderr,
+                line => line.Contains(token, StringComparison.OrdinalIgnoreCase));
+            if (resource is not null && resource != firstError)
+                return firstError is null ? resource : $"{resource} ({firstError})";
+        }
+
+        return FirstMatchingLine(stderr,
+            line => line.Contains("could not open format file", StringComparison.OrdinalIgnoreCase))
+            ?? firstError;
+    }
+
+    private static string? FirstMatchingLine(string text, Func<string, bool> predicate)
+    {
+        foreach (var raw in text.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.Length > 0 && predicate(line))
+                return line;
         }
         return null;
     }
@@ -733,14 +750,20 @@ public class PdfGeneratorService
         return $"{hash}-{name}{extension}";
     }
 
-    private void UpdateFallbackResult(MaterialSource src)
+    private void UpdateFallbackResult(MaterialSource src, string? detail = null)
     {
         var hasFallback = !string.IsNullOrWhiteSpace(src.FrontMatter.DownloadLink);
+        var diagnostic = hasFallback
+            ? "Fallback available after generation failure"
+            : "No download available after generation failure";
+        if (!string.IsNullOrWhiteSpace(detail))
+            diagnostic += $": {detail}";
+
         _manifest.SetResult(src.RouteUrl, new PdfGenerationResult
         {
             Status = PdfGenerationStatus.Failed,
             RelativeUrl = null,
-            Diagnostic = hasFallback ? "Fallback available after generation failure" : "No download available after generation failure"
+            Diagnostic = diagnostic
         });
     }
 

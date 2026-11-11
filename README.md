@@ -42,11 +42,26 @@ Marp exclusions, adjacent output, and source/pipeline hash cache.
 
 Tectonic reads its package cache from `<pipeline-root>/artifacts/tectonic-cache` by
 default. That path derives from the pipeline root, not from the artifacts directory.
-Set `PDF_TECTONIC_ONLY_CACHED=1` to pass `--only-cached` to Tectonic. The run then uses
-only cached resources and never fetches the bundle. Set `PDF_TECTONIC_CACHE_DIR` to one
-cache path to share it between worktrees. Both settings default to today's behavior.
 
-Render one document from a warm cache with no network:
+`PdfGeneratorOptions.OnlyCachedTectonic` passes `--only-cached` to Tectonic. The default
+is `false`. `PDF_TECTONIC_ONLY_CACHED=1` sets the same mode. The values `1` and `true`
+(case-insensitive) enable it. Other values, including `0`, `false`, and padded text, do
+not. The mode is on when the option or the variable enables it. An explicit `false` does
+not override an enabled variable.
+
+`PdfGeneratorOptions.TectonicCacheDirectory` sets the cache path. The default is the
+path above. `PDF_TECTONIC_CACHE_DIR` sets the same path when the option is not set. A
+non-empty option wins over the variable. A relative path resolves against the current
+directory of the generator process, not the content root or the pipeline root.
+
+Cached mode needs a complete cache. A complete cache holds the bundle index, the format,
+and every font the document uses. With a complete cache, a cached run makes no request to
+the bundle host. A cold cache has no bundle index. Tectonic then tries to read the index
+over the network. The run fails when the host is rate-limited or unreachable. An
+incomplete cache can also fail for a missing format or font. The run fails in both cases,
+and the log names the cached resource Tectonic could not read.
+
+Render one document from a complete cache with no network:
 
 ```powershell
 $env:PDF_TECTONIC_ONLY_CACHED = "1"
@@ -59,9 +74,8 @@ dotnet run --project src/RensMarkdownTemplates.Cli -- render `
   --pipeline-root .
 ```
 
-A library caller sets `PdfGeneratorOptions.OnlyCachedTectonic` and
-`PdfGeneratorOptions.TectonicCacheDirectory` instead. An incomplete cache fails the run.
-The log then names the cached resource Tectonic could not read.
+A library caller sets the two options on `PdfGeneratorOptions` instead of the
+environment variables.
 
 ## Canonical frontmatter
 
