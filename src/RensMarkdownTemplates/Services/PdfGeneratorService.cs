@@ -799,9 +799,10 @@ public class PdfGeneratorService
                 }
 
                 var relativePath = Path.GetRelativePath(dir, file);
-                var routeUrl = RouteName(Path.ChangeExtension(relativePath, null)!
-                    .Replace('\\', '/'));
-                var slug = Normalize(routeUrl);
+                var relativeWithoutExtension = Path.ChangeExtension(relativePath, null)!
+                    .Replace('\\', '/');
+                var routeUrl = MaterialRouteUrlFor(relativeWithoutExtension);
+                var slug = MaterialSlugFor(relativeWithoutExtension);
 
                 var body = bodyStart > 0 ? raw[bodyStart..] : raw;
                 var (media, unresolvedMedia) = ResolveMediaPaths(file, body);
@@ -851,10 +852,25 @@ public class PdfGeneratorService
     }
 
     /// <summary>
-    /// The site publishes every article at <c>articles/&lt;file name&gt;</c>, so a
-    /// material nested at <c>&lt;course&gt;/&lt;material&gt;/&lt;name&gt;.md</c> keeps the
-    /// same manifest key and PDF name as a flat <c>&lt;name&gt;.md</c>. Mirrors
-    /// BlazorStatic, which strips a trailing <c>/index</c> from the route.
+    /// The article route for a raw material path. The path is relative to the
+    /// materials directory and has no extension. One trailing <c>/index</c> is
+    /// removed, then the final segment is returned. The site, the feed, and this
+    /// pipeline apply the same rule to a raw path.
+    /// </summary>
+    public static string MaterialRouteUrlFor(string relativePathWithoutExtension) =>
+        RouteName(relativePathWithoutExtension);
+
+    /// <summary>
+    /// The PDF slug for a raw material path. It is the route with edge hyphens
+    /// trimmed. The PDF cache and file name use this value.
+    /// </summary>
+    public static string MaterialSlugFor(string relativePathWithoutExtension) =>
+        Normalize(MaterialRouteUrlFor(relativePathWithoutExtension));
+
+    /// <summary>
+    /// Removes one trailing <c>/index</c> and returns the final segment. Use this
+    /// only for a raw path. An already parsed post URL needs the last segment
+    /// alone, because the library already removed its <c>/index</c>.
     /// </summary>
     private static string RouteName(string relativePathWithoutExtension)
     {
