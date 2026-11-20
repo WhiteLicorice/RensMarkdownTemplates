@@ -9,7 +9,7 @@ namespace RensMarkdownTemplates.Models;
 public class ToolchainManifest
 {
     /// <summary>Generator schema version — bump when generation behavior changes.</summary>
-    public const int GeneratorSchemaVersion = 7;
+    public const int GeneratorSchemaVersion = 9;
 
     /// <summary>Current manifest instance with pinned values.</summary>
     public static ToolchainManifest Current { get; } = new()
