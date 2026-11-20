@@ -115,6 +115,10 @@ Unreferenced diagrams are not rendered. Repeating a marker repeats the diagram, 
 first declaration wins when frontmatter contains a duplicate key. A Mermaid failure
 fails that document without preventing the course site from generating its other PDFs.
 
+In a generated PDF, each step keeps its heading, its description, and its figure on one
+page. The diagram heading and its description travel with the first step. A step taller
+than one page still renders, and breaks inside itself. The figure keeps its own scale.
+
 ## Templates and tests
 
 The default template supports ordinary course materials and the formal syllabus

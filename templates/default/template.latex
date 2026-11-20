@@ -286,6 +286,15 @@ $endif$
   \fi}
 \makeatother
 
+% --- Diagram steps ---
+% A learning-diagram step is a heading, its description, and one figure. The
+% three belong on one page, so a step opens with \filbreak: the page breaks
+% before the step when the step does not fit, and nothing happens when it does.
+% \filbreak adds a breakpoint and boxes nothing, so a step taller than a page
+% still breaks inside itself and still renders. TeX never breaks before the
+% first box on a page, so a step that opens a page cannot leave it blank.
+\newenvironment{keepstep}{\filbreak}{}
+
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
 

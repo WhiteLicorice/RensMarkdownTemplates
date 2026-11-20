@@ -300,16 +300,7 @@ public class PdfGeneratorService
                         continue;
                     }
 
-                    var sb = new StringBuilder();
-                    sb.AppendLine();
-                    sb.AppendLine($"## {diagram.Title}");
-                    if (!string.IsNullOrWhiteSpace(diagram.Description))
-                    {
-                        sb.AppendLine();
-                        sb.AppendLine(diagram.Description);
-                    }
-                    sb.AppendLine();
-
+                    var figureReferences = new List<string>();
                     foreach (var step in diagram.Steps)
                     {
                         if (string.IsNullOrWhiteSpace(step.Mermaid))
@@ -331,22 +322,11 @@ public class PdfGeneratorService
                             goto diagramFailed;
                         }
 
-                        sb.AppendLine($"### {step.Title}");
-                        if (!string.IsNullOrWhiteSpace(step.Description))
-                        {
-                            sb.AppendLine();
-                            sb.AppendLine(step.Description);
-                            sb.AppendLine();
-                        }
-
-                        var rel = Path.GetFileName(outputPdf).Replace('\\', '/');
-                        sb.AppendLine($"![{step.Title}]({rel})");
-                        sb.AppendLine();
-
+                        figureReferences.Add(Path.GetFileName(outputPdf).Replace('\\', '/'));
                         stepIdx++;
                     }
 
-                    sectionsByKey[key] = sb.ToString();
+                    sectionsByKey[key] = BuildDiagramSection(diagram, figureReferences);
                 }
             }
 
@@ -603,6 +583,71 @@ public class PdfGeneratorService
             return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Markdown for one learning diagram: its heading, its description, and its
+    /// steps. The heading and the description travel inside the first step's
+    /// keep-together unit, so a page break never leaves them alone on a page.
+    /// </summary>
+    internal static string BuildDiagramSection(LearningDiagram diagram,
+        IReadOnlyList<string> figureReferences)
+    {
+        var heading = new StringBuilder();
+        heading.AppendLine($"## {diagram.Title}");
+        if (!string.IsNullOrWhiteSpace(diagram.Description))
+        {
+            heading.AppendLine();
+            heading.AppendLine(diagram.Description);
+        }
+        heading.AppendLine();
+
+        var sb = new StringBuilder();
+        sb.AppendLine();
+        if (figureReferences.Count == 0)
+        {
+            sb.Append(heading);
+            return sb.ToString();
+        }
+
+        for (var index = 0; index < figureReferences.Count; index++)
+        {
+            sb.Append(BuildStepMarkdown(diagram.Steps[index], figureReferences[index],
+                index == 0 ? heading.ToString() : ""));
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Markdown for one learning-diagram step: its heading, its description, and
+    /// its figure, wrapped in the template's keep-together unit so the three
+    /// reach the same page. <paramref name="preamble"/> is Markdown that has to
+    /// stay with the step, such as the diagram heading above the first one.
+    /// </summary>
+    internal static string BuildStepMarkdown(LearningDiagramStep step, string figureReference,
+        string preamble = "")
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("```{=latex}");
+        sb.AppendLine("\\begin{keepstep}");
+        sb.AppendLine("```");
+        sb.AppendLine();
+        sb.Append(preamble);
+        sb.AppendLine($"### {step.Title}");
+        if (!string.IsNullOrWhiteSpace(step.Description))
+        {
+            sb.AppendLine();
+            sb.AppendLine(step.Description);
+            sb.AppendLine();
+        }
+
+        sb.AppendLine($"![{step.Title}]({figureReference})");
+        sb.AppendLine();
+        sb.AppendLine("```{=latex}");
+        sb.AppendLine("\\end{keepstep}");
+        sb.AppendLine("```");
+        sb.AppendLine();
+        return sb.ToString();
     }
 
     internal string BuildAugmentedMarkdown(MaterialSource src, Dictionary<string, string> sectionsByKey, ILogger logger)
