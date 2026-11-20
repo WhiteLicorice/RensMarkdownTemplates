@@ -116,8 +116,11 @@ first declaration wins when frontmatter contains a duplicate key. A Mermaid fail
 fails that document without preventing the course site from generating its other PDFs.
 
 In a generated PDF, each step keeps its heading, its description, and its figure on one
-page. The diagram heading and its description travel with the first step. A step taller
-than one page still renders, and breaks inside itself. The figure keeps its own scale.
+page. The diagram heading and its description stay with the first step. The keep-together
+unit boxes the step first, so TeX knows the height of the step. When the step fits on one
+page and the space left is smaller, the page breaks before the step. A step that fits
+stays on its page when the page overflows later. A step taller than one page still
+renders, and breaks inside itself. The figure keeps its own scale.
 
 ## Templates and tests
 

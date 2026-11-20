@@ -300,7 +300,7 @@ public class PdfGeneratorService
                         continue;
                     }
 
-                    var figureReferences = new List<string>();
+                    var renderedSteps = new List<(LearningDiagramStep Step, string FigureReference)>();
                     foreach (var step in diagram.Steps)
                     {
                         if (string.IsNullOrWhiteSpace(step.Mermaid))
@@ -322,11 +322,11 @@ public class PdfGeneratorService
                             goto diagramFailed;
                         }
 
-                        figureReferences.Add(Path.GetFileName(outputPdf).Replace('\\', '/'));
+                        renderedSteps.Add((step, Path.GetFileName(outputPdf).Replace('\\', '/')));
                         stepIdx++;
                     }
 
-                    sectionsByKey[key] = BuildDiagramSection(diagram, figureReferences);
+                    sectionsByKey[key] = BuildDiagramSection(diagram, renderedSteps);
                 }
             }
 
@@ -587,11 +587,13 @@ public class PdfGeneratorService
 
     /// <summary>
     /// Markdown for one learning diagram: its heading, its description, and its
-    /// steps. The heading and the description travel inside the first step's
+    /// steps. The heading and the description stay inside the first step's
     /// keep-together unit, so a page break never leaves them alone on a page.
+    /// Each entry pairs a step with the figure that step rendered, so a step
+    /// can never take another step's figure.
     /// </summary>
     internal static string BuildDiagramSection(LearningDiagram diagram,
-        IReadOnlyList<string> figureReferences)
+        IReadOnlyList<(LearningDiagramStep Step, string FigureReference)> renderedSteps)
     {
         var heading = new StringBuilder();
         heading.AppendLine($"## {diagram.Title}");
@@ -604,15 +606,16 @@ public class PdfGeneratorService
 
         var sb = new StringBuilder();
         sb.AppendLine();
-        if (figureReferences.Count == 0)
+        if (renderedSteps.Count == 0)
         {
             sb.Append(heading);
             return sb.ToString();
         }
 
-        for (var index = 0; index < figureReferences.Count; index++)
+        for (var index = 0; index < renderedSteps.Count; index++)
         {
-            sb.Append(BuildStepMarkdown(diagram.Steps[index], figureReferences[index],
+            sb.Append(BuildStepMarkdown(renderedSteps[index].Step,
+                renderedSteps[index].FigureReference,
                 index == 0 ? heading.ToString() : ""));
         }
         return sb.ToString();
@@ -621,8 +624,9 @@ public class PdfGeneratorService
     /// <summary>
     /// Markdown for one learning-diagram step: its heading, its description, and
     /// its figure, wrapped in the template's keep-together unit so the three
-    /// reach the same page. <paramref name="preamble"/> is Markdown that has to
-    /// stay with the step, such as the diagram heading above the first one.
+    /// parts reach the same page. <paramref name="preamble"/> is Markdown that
+    /// has to stay with the step, such as the diagram heading above the first
+    /// one.
     /// </summary>
     internal static string BuildStepMarkdown(LearningDiagramStep step, string figureReference,
         string preamble = "")

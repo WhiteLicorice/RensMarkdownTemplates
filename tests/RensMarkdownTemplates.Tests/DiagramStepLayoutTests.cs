@@ -110,11 +110,16 @@ public class DiagramStepLayoutTests
         }
     };
 
+    private static List<(LearningDiagramStep Step, string FigureReference)> Rendered(
+        LearningDiagram diagram, params string[] figures) =>
+        diagram.Steps.Zip(figures, (step, figure) => (step, figure)).ToList();
+
     [Fact]
     public void Diagram_PutsHeadingAndDescriptionInsideFirstStepUnit()
     {
+        var diagram = Diagram();
         var markdown = PdfGeneratorService.BuildDiagramSection(
-            Diagram(), new[] { "mmd_0001.pdf", "mmd_0002.pdf" });
+            diagram, Rendered(diagram, "mmd_0001.pdf", "mmd_0002.pdf"));
 
         var opener = markdown.IndexOf(Opener, StringComparison.Ordinal);
         var closer = markdown.IndexOf(Closer, StringComparison.Ordinal);
@@ -130,12 +135,26 @@ public class DiagramStepLayoutTests
     [Fact]
     public void Diagram_DoesNotRepeatHeadingInLaterStepUnits()
     {
+        var diagram = Diagram();
         var markdown = PdfGeneratorService.BuildDiagramSection(
-            Diagram(), new[] { "mmd_0001.pdf", "mmd_0002.pdf" });
+            diagram, Rendered(diagram, "mmd_0001.pdf", "mmd_0002.pdf"));
 
         Assert.Equal(1, Count(markdown, "## One Inode, Five Pointers"));
         Assert.Equal(2, Count(markdown, Opener));
         Assert.Equal(2, Count(markdown, Closer));
+    }
+
+    [Fact]
+    public void Diagram_PairsEachStepWithItsOwnFigure()
+    {
+        // The step and its figure arrive as one entry, so a step can never take
+        // another step's figure.
+        var diagram = Diagram();
+        var markdown = PdfGeneratorService.BuildDiagramSection(
+            diagram, Rendered(diagram, "mmd_0001.pdf", "mmd_0002.pdf"));
+
+        Assert.Contains("![Follow each pointer](mmd_0001.pdf)", markdown);
+        Assert.Contains("![Read the pointer block](mmd_0002.pdf)", markdown);
     }
 
     [Fact]
@@ -144,7 +163,8 @@ public class DiagramStepLayoutTests
         var diagram = Diagram();
         diagram.Steps.Clear();
 
-        var markdown = PdfGeneratorService.BuildDiagramSection(diagram, Array.Empty<string>());
+        var markdown = PdfGeneratorService.BuildDiagramSection(
+            diagram, new List<(LearningDiagramStep Step, string FigureReference)>());
 
         Assert.Contains("## One Inode, Five Pointers", markdown);
         Assert.DoesNotContain(Opener, markdown);
