@@ -587,10 +587,10 @@ public class PdfGeneratorService
 
     /// <summary>
     /// Markdown for one learning diagram: its heading, its description, and its
-    /// steps. The heading and the description stay inside the first step's
-    /// keep-together unit, so a page break never leaves them alone on a page.
-    /// Each entry pairs a step with the figure that step rendered, so a step
-    /// can never take another step's figure.
+    /// steps. The heading and the description travel in a unit of their own
+    /// inside the first step's keep-together unit, so the template can measure
+    /// the step apart from them. Each entry pairs a step with the figure that
+    /// step rendered, so a step can never take another step's figure.
     /// </summary>
     internal static string BuildDiagramSection(LearningDiagram diagram,
         IReadOnlyList<(LearningDiagramStep Step, string FigureReference)> renderedSteps)
@@ -626,17 +626,30 @@ public class PdfGeneratorService
     /// its figure, wrapped in the template's keep-together unit so the three
     /// parts reach the same page. <paramref name="preamble"/> is Markdown that
     /// has to stay with the step, such as the diagram heading above the first
-    /// one.
+    /// one. The preamble travels in a unit of its own, so the template can
+    /// measure the step apart from it.
     /// </summary>
     internal static string BuildStepMarkdown(LearningDiagramStep step, string figureReference,
         string preamble = "")
     {
+        var hasPreamble = !string.IsNullOrEmpty(preamble);
         var sb = new StringBuilder();
         sb.AppendLine("```{=latex}");
         sb.AppendLine("\\begin{keepstep}");
+        if (hasPreamble)
+        {
+            sb.AppendLine("\\begin{keephead}");
+        }
         sb.AppendLine("```");
         sb.AppendLine();
-        sb.Append(preamble);
+        if (hasPreamble)
+        {
+            sb.Append(preamble);
+            sb.AppendLine("```{=latex}");
+            sb.AppendLine("\\end{keephead}");
+            sb.AppendLine("```");
+            sb.AppendLine();
+        }
         sb.AppendLine($"### {step.Title}");
         if (!string.IsNullOrWhiteSpace(step.Description))
         {

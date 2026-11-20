@@ -133,6 +133,25 @@ public class DiagramStepLayoutTests
     }
 
     [Fact]
+    public void Diagram_PutsHeadingAndDescriptionInAUnitOfTheirOwn()
+    {
+        // The template measures the step apart from the diagram heading, so the
+        // heading travels in its own unit inside the first step's unit.
+        var diagram = Diagram();
+        var markdown = PdfGeneratorService.BuildDiagramSection(
+            diagram, Rendered(diagram, "mmd_0001.pdf", "mmd_0002.pdf"));
+
+        var opener = markdown.IndexOf("\\begin{keephead}", StringComparison.Ordinal);
+        var closer = markdown.IndexOf("\\end{keephead}", StringComparison.Ordinal);
+        Assert.True(opener >= 0 && closer > opener, "the diagram heading is not a unit of its own");
+
+        var inside = markdown[opener..closer];
+        Assert.Contains("## One Inode, Five Pointers", inside);
+        Assert.Contains("One inode points to four direct file-data blocks", inside);
+        Assert.DoesNotContain("### Follow each pointer", inside);
+    }
+
+    [Fact]
     public void Diagram_DoesNotRepeatHeadingInLaterStepUnits()
     {
         var diagram = Diagram();
@@ -140,6 +159,7 @@ public class DiagramStepLayoutTests
             diagram, Rendered(diagram, "mmd_0001.pdf", "mmd_0002.pdf"));
 
         Assert.Equal(1, Count(markdown, "## One Inode, Five Pointers"));
+        Assert.Equal(1, Count(markdown, "\\begin{keephead}"));
         Assert.Equal(2, Count(markdown, Opener));
         Assert.Equal(2, Count(markdown, Closer));
     }

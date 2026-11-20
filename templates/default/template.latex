@@ -288,22 +288,63 @@ $endif$
 
 % --- Diagram steps ---
 % A learning-diagram step is a heading, its description, and one figure. The
-% three parts belong on one page. The unit boxes the step first, so TeX knows
-% the height of the step. When the step fits on one page and the space left is
-% smaller, the page breaks before the step. The box contents then go back on
-% the page unchanged. A step taller than one page goes back without a break, so
-% it still breaks inside itself and loses nothing.
+% three parts belong on one page. The diagram heading and its description are
+% a unit of their own. That unit is held until the first step closes, so the
+% heading and the step can be measured against the page together.
+%
+% The step unit boxes the step first, so TeX knows the height of the step.
+% When the step fits on one page and the space left is smaller than the step,
+% the page breaks before the step. When the diagram heading and the step fit
+% on one page together, the page breaks before the heading instead, so the
+% heading stays with its step. When the two do not fit on one page together,
+% the step keeps its own page and the heading stays on the page above. The box
+% contents then go back on the page unchanged. A step taller than one page
+% goes back without a break, so it still breaks inside itself and loses
+% nothing.
 \newsavebox{\keepstepbox}
+\newsavebox{\keepheadbox}
 \newdimen\keepstepht
+\newdimen\keepheadht
+\newif\ifkeephead
+% The step breaks before itself when it fits on one page and the space left is
+% smaller than the step. #1 is the height of material already on the page that
+% \pagetotal does not count yet, such as an unboxed diagram heading.
+\newcommand{\keepstepbreak}[1]{%
+  \ifdim\keepstepht>\pagegoal\else
+    \ifdim\keepstepht>\dimexpr\pagegoal-\pagetotal-\pagedepth-#1\relax
+      \newpage
+    \fi
+  \fi}
+\newenvironment{keephead}{%
+  \par\global\setbox\keepheadbox\vbox\bgroup
+}{%
+  \egroup
+  \global\keepheadht=\dimexpr\ht\keepheadbox+\dp\keepheadbox\relax
+  \global\keepheadtrue
+}
 \newenvironment{keepstep}{%
   \par\setbox\keepstepbox\vbox\bgroup
 }{%
   \egroup
   \keepstepht=\ht\keepstepbox \advance\keepstepht by \dp\keepstepbox
-  \ifdim\keepstepht>\pagegoal\else
-    \ifdim\keepstepht>\dimexpr\pagegoal-\pagetotal-\pagedepth\relax
-      \newpage
+  \ifkeephead
+    \ifdim\dimexpr\keepheadht+\keepstepht\relax>\pagegoal
+      % The heading and the step cannot share a page. The heading stays on
+      % this page, and the step takes the next page when it fits on one.
+      \unvbox\keepheadbox
+      \global\keepheadfalse
+      \keepstepbreak{\keepheadht}
+    \else
+      % The heading and the step fit on one page together, so they move
+      % together.
+      \ifdim\dimexpr\keepheadht+\keepstepht\relax>\dimexpr\pagegoal-\pagetotal-\pagedepth\relax
+        \newpage
+      \fi
+      \unvbox\keepheadbox
+      \global\keepheadfalse
     \fi
+  \else
+    \keepstepbreak{0pt}
   \fi
   \unvbox\keepstepbox
 }

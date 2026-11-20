@@ -44,6 +44,20 @@ public class KeepStepTemplateTests
         // The generator writes \begin{keepstep} into every diagram step. A
         // template that does not define the environment fails in LaTeX with an
         // undefined environment, so each template has to carry the definition.
+        AssertEveryTemplateDefines(EnvironmentName);
+    }
+
+    [Fact]
+    public void EveryTemplate_DefinesTheKeepHeadEnvironment()
+    {
+        // The generator writes \begin{keephead} around the diagram heading of
+        // the first step, so the template can measure the step apart from the
+        // heading. A template without the environment fails in LaTeX.
+        AssertEveryTemplateDefines("keephead");
+    }
+
+    private static void AssertEveryTemplateDefines(string name)
+    {
         var templates = Directory.GetDirectories(Path.Combine(RepositoryRoot(), "templates"));
 
         Assert.NotEmpty(templates);
@@ -51,7 +65,7 @@ public class KeepStepTemplateTests
         {
             var template = Path.Combine(directory, "template.latex");
             Assert.True(File.Exists(template), $"{template} is missing");
-            Assert.Contains($"\\newenvironment{{{EnvironmentName}}}", Read(template));
+            Assert.Contains($"\\newenvironment{{{name}}}", Read(template));
         }
     }
 
