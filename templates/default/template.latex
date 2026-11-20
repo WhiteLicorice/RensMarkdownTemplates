@@ -302,8 +302,9 @@ $endif$
 % When the two do not fit on one page together, the heading starts a new page
 % and the step follows it. The heading never stays at the foot of the page
 % above. If the step does not fit under the heading on that new page, the
-% page breaks before the step. That leaves the heading alone at the top of a
-% page. The step keeps the next page whole.
+% page breaks before the step. The step keeps the next page whole. A heading
+% sits alone at the top of a page only in that case. It cannot share a page
+% with a step that fits on one page.
 %
 % The box contents return to the page unchanged. A step taller than one page
 % returns without a break, so it still breaks inside itself and loses
@@ -314,11 +315,10 @@ $endif$
 \newdimen\keepheadht
 \newif\ifkeephead
 % The step breaks before itself when it fits on one page and the space left is
-% smaller than the step. #1 is the height of material already on the page that
-% \pagetotal does not count yet, such as an unboxed diagram heading.
-\newcommand{\keepstepbreak}[1]{%
+% smaller than the step.
+\newcommand{\keepstepbreak}{%
   \ifdim\keepstepht>\pagegoal\else
-    \ifdim\keepstepht>\dimexpr\pagegoal-\pagetotal-\pagedepth-#1\relax
+    \ifdim\keepstepht>\dimexpr\pagegoal-\pagetotal-\pagedepth\relax
       \newpage
     \fi
   \fi}
@@ -344,7 +344,7 @@ $endif$
       \unvbox\keepheadbox
       \global\keepheadfalse
       \nobreak
-      \keepstepbreak{0pt}
+      \keepstepbreak
     \else
       % The heading and the step fit on one page together, so they move
       % together.
@@ -355,7 +355,7 @@ $endif$
       \global\keepheadfalse
     \fi
   \else
-    \keepstepbreak{0pt}
+    \keepstepbreak
   \fi
   \unvbox\keepstepbox
 }

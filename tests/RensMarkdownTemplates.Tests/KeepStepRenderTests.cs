@@ -15,18 +15,19 @@ namespace RensMarkdownTemplates.Tests;
 public class KeepStepRenderTests
 {
     // The text block of the default template at 11 pt is 745.315 pt tall. The
-    // diagram heading and its description add 78.27 pt, so a first step of
-    // 686.99 pt fits on a page alone and does not fit under its heading.
+    // diagram heading and its description of the document below add 62.85 pt,
+    // so a first step of 727.13 pt fits on a page alone and does not fit under
+    // its heading.
     private const double TextBlockPt = 745.315;
 
     [Fact]
     public void FirstStep_ThatFitsOnOnePage_StaysWholeUnderItsDiagramHeading()
     {
-        // The step alone is 686.99 pt and fits on a page with 58 pt to spare.
-        // The diagram heading and its description add 78.27 pt, so the pair is
-        // 765.27 pt and does not fit on one page. The step still has to reach
-        // one page whole.
-        var render = Render("fits-under-heading", stepPt: 600);
+        // The step alone is 727.13 pt and fits on a page with 18.2 pt to spare.
+        // The diagram heading and its description add 62.85 pt, so the pair is
+        // 789.98 pt and exceeds one page by 44.7 pt. The step still has to
+        // reach one page whole.
+        var render = Render("fits-under-heading", stepPt: 640);
 
         Assert.Equal(render.Page("keepstep-start"), render.Page("keepstep-end"));
     }
@@ -34,7 +35,7 @@ public class KeepStepRenderTests
     [Fact]
     public void DiagramHeading_StaysWithItsFirstStep_WhenTheTwoFitOnOnePage()
     {
-        // The step alone is 646.99 pt and the pair is 725.27 pt, so the two fit
+        // The step alone is 647.13 pt and the pair is 709.98 pt, so the two fit
         // on one page together. The heading must not sit at a page foot with
         // its step overleaf.
         var render = Render("heading-with-step", stepPt: 560);
@@ -59,15 +60,35 @@ public class KeepStepRenderTests
     [Fact]
     public void DiagramHeading_DoesNotSitAloneAtThePageFoot_WhenTheStepCannotShareItsPage()
     {
-        // The step alone is 690.73 pt and fits on a page with 54.6 pt to spare.
-        // The diagram heading and its description push the pair past one page.
-        // A 624 pt filler puts the heading's last line at y=778.8 of the
-        // 793.04 pt text block, 14 pt above the foot. The heading must not stay
-        // there with its step overleaf.
-        var render = Render("heading-at-foot", stepPt: 603.6, fillerPt: 624);
+        // The step alone is 727.13 pt and fits on a page with 18.2 pt to spare.
+        // The diagram heading and its description add 62.85 pt, so the pair is
+        // 789.98 pt and exceeds one page by 44.7 pt. A 624 pt filler puts the
+        // heading's last line at y=778.8 of the 793.04 pt text block, 14 pt
+        // above the foot. The heading must not stay there with its step
+        // overleaf. It starts a new page, and the step keeps the next page
+        // whole.
+        var render = Render("heading-at-foot", stepPt: 640, fillerPt: 624);
 
-        Assert.Equal(render.Page("keepstep-heading"), render.Page("keepstep-start"));
+        Assert.True(
+            PageNumber(render, "keepstep-heading") > PageNumber(render, "keepstep-before"),
+            "the diagram heading stayed on the page above its step, at the page foot");
         Assert.Equal(render.Page("keepstep-start"), render.Page("keepstep-end"));
+    }
+
+    [Fact]
+    public void DiagramHeading_StartsANewPage_WhenTheHeadingAndTheStepExceedOnePage()
+    {
+        // The reviewer's r4-g-620 case. The step alone is 707.13 pt and fits on
+        // a page with 38.2 pt to spare. The diagram heading and its description
+        // add 62.85 pt, so the pair is 769.98 pt and exceeds one page by 24.7
+        // pt. The step wins: it stays whole on one page, and the heading starts
+        // a new page instead of staying at the foot of the page above.
+        var render = Render("heading-over-page", stepPt: 620);
+
+        Assert.Equal(render.Page("keepstep-start"), render.Page("keepstep-end"));
+        Assert.True(
+            PageNumber(render, "keepstep-heading") > PageNumber(render, "keepstep-before"),
+            "the diagram heading stayed on the page above its step, at the page foot");
     }
 
     // --- Rendering ---
@@ -80,6 +101,9 @@ public class KeepStepRenderTests
                 : throw new Xunit.Sdk.XunitException(
                     $"the render wrote no page for {label}; log:\n{Log}");
     }
+
+    private static int PageNumber(RenderResult render, string label) =>
+        int.Parse(render.Page(label), System.Globalization.CultureInfo.InvariantCulture);
 
     private static RenderResult Render(string name, double stepPt, int fillerPt = 0)
     {
@@ -170,7 +194,7 @@ public class KeepStepRenderTests
 
         \section{Before}
 
-        One short paragraph before the diagram.
+        One short paragraph before the diagram.\label{keepstep-before}
 
         FILLER
 
