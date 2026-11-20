@@ -587,7 +587,7 @@ public class PdfGeneratorService
 
     /// <summary>
     /// Markdown for one learning diagram: its heading, its description, and its
-    /// steps. The heading and the description travel in a unit of their own
+    /// steps. The heading and the description sit in a unit of their own
     /// inside the first step's keep-together unit, so the template can measure
     /// the step apart from them. Each entry pairs a step with the figure that
     /// step rendered, so a step can never take another step's figure.
@@ -626,7 +626,7 @@ public class PdfGeneratorService
     /// its figure, wrapped in the template's keep-together unit so the three
     /// parts reach the same page. <paramref name="preamble"/> is Markdown that
     /// has to stay with the step, such as the diagram heading above the first
-    /// one. The preamble travels in a unit of its own, so the template can
+    /// one. The preamble sits in a unit of its own, so the template can
     /// measure the step apart from it.
     /// </summary>
     internal static string BuildStepMarkdown(LearningDiagramStep step, string figureReference,

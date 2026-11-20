@@ -91,12 +91,12 @@ public class DiagramStepLayoutTests
         var markdown = PdfGeneratorService.BuildStepMarkdown(Step(), "mmd_0001.pdf");
 
         // A bare fence would reach LaTeX as a verbatim listing, so the unit has
-        // to travel in a raw-LaTeX block.
+        // to sit in a raw-LaTeX block.
         Assert.Contains("```{=latex}", markdown);
         Assert.DoesNotContain("```latex", markdown);
     }
 
-    // --- Diagram heading travels with the first step ---
+    // --- Diagram heading stays with the first step ---
 
     private static LearningDiagram Diagram() => new()
     {
@@ -136,7 +136,7 @@ public class DiagramStepLayoutTests
     public void Diagram_PutsHeadingAndDescriptionInAUnitOfTheirOwn()
     {
         // The template measures the step apart from the diagram heading, so the
-        // heading travels in its own unit inside the first step's unit.
+        // heading sits in its own unit inside the first step's unit.
         var diagram = Diagram();
         var markdown = PdfGeneratorService.BuildDiagramSection(
             diagram, Rendered(diagram, "mmd_0001.pdf", "mmd_0002.pdf"));

@@ -56,6 +56,20 @@ public class KeepStepRenderTests
         Assert.True(render.Labels.ContainsKey("keepstep-after"), "the text after the diagram was not typeset");
     }
 
+    [Fact]
+    public void DiagramHeading_DoesNotSitAloneAtThePageFoot_WhenTheStepCannotShareItsPage()
+    {
+        // The step alone is 690.73 pt and fits on a page with 54.6 pt to spare.
+        // The diagram heading and its description push the pair past one page.
+        // A 624 pt filler puts the heading's last line at y=778.8 of the
+        // 793.04 pt text block, 14 pt above the foot. The heading must not stay
+        // there with its step overleaf.
+        var render = Render("heading-at-foot", stepPt: 603.6, fillerPt: 624);
+
+        Assert.Equal(render.Page("keepstep-heading"), render.Page("keepstep-start"));
+        Assert.Equal(render.Page("keepstep-start"), render.Page("keepstep-end"));
+    }
+
     // --- Rendering ---
 
     private sealed record RenderResult(string Log, IReadOnlyDictionary<string, string> Labels)
@@ -67,14 +81,14 @@ public class KeepStepRenderTests
                     $"the render wrote no page for {label}; log:\n{Log}");
     }
 
-    private static RenderResult Render(string name, int stepPt)
+    private static RenderResult Render(string name, double stepPt, int fillerPt = 0)
     {
         var root = RepositoryRoot();
         var workDir = Path.Combine(root, "artifacts", "keepstep-render", name);
         Directory.CreateDirectory(workDir);
 
         var texPath = Path.Combine(workDir, "document.tex");
-        File.WriteAllText(texPath, Document(stepPt), new UTF8Encoding(false));
+        File.WriteAllText(texPath, Document(stepPt, fillerPt), new UTF8Encoding(false));
 
         var cacheDir = Path.Combine(root, "artifacts", "tectonic-cache");
         Directory.CreateDirectory(cacheDir);
@@ -129,11 +143,13 @@ public class KeepStepRenderTests
 
     /// <summary>
     /// The document the generator writes for one diagram: a paragraph, the
-    /// diagram heading and its description, then one step. The heading travels
+    /// diagram heading and its description, then one step. The heading sits
     /// in its own unit when the template defines one, and the fallback keeps
     /// the document identical against a template that has no such unit.
+    /// <paramref name="fillerPt"/> adds a rule above the diagram, so a test can
+    /// put the diagram heading at a chosen height on the page.
     /// </summary>
-    private static string Document(int stepPt) =>
+    private static string Document(double stepPt, int fillerPt) =>
         """
         \documentclass[a4paper,11pt]{article}
         \usepackage[left=0.68in,right=0.68in,top=0.70in,bottom=0.68in]{geometry}
@@ -155,6 +171,8 @@ public class KeepStepRenderTests
         \section{Before}
 
         One short paragraph before the diagram.
+
+        FILLER
 
         \begin{keepstep}
 
@@ -188,6 +206,7 @@ public class KeepStepRenderTests
         \end{document}
         """
             .Replace("UNIT", Unit())
+            .Replace("FILLER", fillerPt > 0 ? $@"\rule{{0.6\linewidth}}{{{fillerPt}pt}}" : "")
             .Replace("STEPPT", stepPt.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
     /// <summary>

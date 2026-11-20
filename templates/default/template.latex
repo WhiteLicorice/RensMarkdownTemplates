@@ -289,17 +289,24 @@ $endif$
 % --- Diagram steps ---
 % A learning-diagram step is a heading, its description, and one figure. The
 % three parts belong on one page. The diagram heading and its description are
-% a unit of their own. That unit is held until the first step closes, so the
-% heading and the step can be measured against the page together.
+% a unit of their own. The template holds that unit until the first step
+% closes, so the heading and the step can be measured against the page
+% together.
 %
 % The step unit boxes the step first, so TeX knows the height of the step.
 % When the step fits on one page and the space left is smaller than the step,
 % the page breaks before the step. When the diagram heading and the step fit
 % on one page together, the page breaks before the heading instead, so the
-% heading stays with its step. When the two do not fit on one page together,
-% the step keeps its own page and the heading stays on the page above. The box
-% contents then go back on the page unchanged. A step taller than one page
-% goes back without a break, so it still breaks inside itself and loses
+% heading stays with its step.
+%
+% When the two do not fit on one page together, the heading starts a new page
+% and the step follows it. The heading never stays at the foot of the page
+% above. If the step does not fit under the heading on that new page, the
+% page breaks before the step. That leaves the heading alone at the top of a
+% page. The step keeps the next page whole.
+%
+% The box contents return to the page unchanged. A step taller than one page
+% returns without a break, so it still breaks inside itself and loses
 % nothing.
 \newsavebox{\keepstepbox}
 \newsavebox{\keepheadbox}
@@ -329,11 +336,15 @@ $endif$
   \keepstepht=\ht\keepstepbox \advance\keepstepht by \dp\keepstepbox
   \ifkeephead
     \ifdim\dimexpr\keepheadht+\keepstepht\relax>\pagegoal
-      % The heading and the step cannot share a page. The heading stays on
-      % this page, and the step takes the next page when it fits on one.
+      % The heading and the step cannot share a page. The heading starts a
+      % new page, and the step follows it when it fits under the heading.
+      % The penalty makes TeX count the heading on the new page, so the
+      % measurement below sees the space the heading leaves.
+      \newpage
       \unvbox\keepheadbox
       \global\keepheadfalse
-      \keepstepbreak{\keepheadht}
+      \nobreak
+      \keepstepbreak{0pt}
     \else
       % The heading and the step fit on one page together, so they move
       % together.
