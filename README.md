@@ -124,11 +124,14 @@ than the step, the page breaks before the step.
 When the diagram heading and the step fit on one page together, the page breaks before the
 heading. The heading then stays with its step. When the two do not fit on one page
 together, the heading starts a new page. The step follows it. The heading never stays at
-the foot of the page above. If the step does not fit under the heading on that new page,
-the page breaks before the step. The step keeps the next page whole. A heading sits alone
-at the top of a page only in that case. It cannot share a page with a step that fits on
-one page. A step that fits stays on its page when the page overflows later. A step taller
-than one page still renders, and breaks inside itself. The figure keeps its own scale.
+the foot of the page above.
+
+If the step does not fit under the heading on that new page, the page breaks before the
+step. The step keeps the next page whole. A heading sits alone at the top of a page only
+in that case. It cannot share a page with a step that fits on one page.
+
+A step that fits stays on its page when the page overflows later. A step taller than one
+page still renders, and breaks inside itself. The figure keeps its own scale.
 
 ## Templates and tests
 

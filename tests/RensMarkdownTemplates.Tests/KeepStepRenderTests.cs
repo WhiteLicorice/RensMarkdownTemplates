@@ -15,9 +15,9 @@ namespace RensMarkdownTemplates.Tests;
 public class KeepStepRenderTests
 {
     // The text block of the default template at 11 pt is 745.315 pt tall. The
-    // diagram heading and its description of the document below add 62.85 pt,
-    // so a first step of 727.13 pt fits on a page alone and does not fit under
-    // its heading.
+    // diagram heading and its description of the document below add 62.85 pt.
+    // A first step of 727.13 pt then fits on a page alone. It does not fit
+    // under its heading.
     private const double TextBlockPt = 745.315;
 
     [Fact]
@@ -48,9 +48,9 @@ public class KeepStepRenderTests
     [Fact]
     public void StepTallerThanOnePage_StillRendersWithoutLoss()
     {
-        // The step alone is 746.99 pt, taller than the 745.315 pt text block,
-        // so it has to break inside itself. Nothing may go missing.
-        var render = Render("taller-than-page", stepPt: 660);
+        // The step alone is 786.99 pt, taller than the 745.315 pt text block by
+        // 41.7 pt, so it has to break inside itself. Nothing may go missing.
+        var render = Render("taller-than-page", stepPt: 700);
 
         Assert.True(render.Labels.ContainsKey("keepstep-start"), "the step heading was not typeset");
         Assert.True(render.Labels.ContainsKey("keepstep-end"), "the end of the step was not typeset");
@@ -81,8 +81,8 @@ public class KeepStepRenderTests
         // The reviewer's r4-g-620 case. The step alone is 707.13 pt and fits on
         // a page with 38.2 pt to spare. The diagram heading and its description
         // add 62.85 pt, so the pair is 769.98 pt and exceeds one page by 24.7
-        // pt. The step wins: it stays whole on one page, and the heading starts
-        // a new page instead of staying at the foot of the page above.
+        // pt. The step wins: it stays whole on one page. The heading starts a
+        // new page instead of staying at the foot of the page above.
         var render = Render("heading-over-page", stepPt: 620);
 
         Assert.Equal(render.Page("keepstep-start"), render.Page("keepstep-end"));
